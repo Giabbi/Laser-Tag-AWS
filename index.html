@@ -188,6 +188,9 @@
       const data = await res.json();
       if (data.result != undefined) {
         document.getElementById("info").innerText = data.result + " | " + data.score;
+      } else
+      {
+        document.getElementById("info").innerText = "Move using arrows and shoot using WASD" 
       }
     }
   
