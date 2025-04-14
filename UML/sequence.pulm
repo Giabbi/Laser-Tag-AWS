@@ -1,0 +1,22 @@
+@startuml sequence
+actor Player
+participant "Frontend (JS)" as Frontend
+participant "API Gateway" as API
+participant "Lambda: shootLaser" as ShootLambda
+participant "DynamoDB" as DB
+
+Player -> Frontend: Press 'Shoot' (WASD key)
+Frontend -> API: POST /shootLaser {name, direction}
+API -> ShootLambda: Invoke Function
+ShootLambda -> DB: GET Player Record
+DB --> ShootLambda: Return Player Data
+ShootLambda -> DB: SCAN All Players
+DB --> ShootLambda: Return List of Players
+alt Hit Found
+  ShootLambda -> DB: UPDATE Score (Increment)
+end
+ShootLambda --> API: Response with result
+API --> Frontend: Response with result
+Frontend -> Player: Display "Hit ..." or "Miss"
+
+@enduml

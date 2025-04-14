@@ -1,0 +1,16 @@
+@startuml case
+actor Player
+
+rectangle "Laser Squares Game" {
+  (Register)
+  (Move)
+  (Shoot)
+  (View Leaderboard)
+}
+
+Player --> (Register) : Enters Name
+Player --> (Move) : Uses Arrow Keys
+Player --> (Shoot) : Uses WASD Keys
+Player --> (View Leaderboard) : Views Scores
+
+@enduml

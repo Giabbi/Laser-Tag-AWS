@@ -1,0 +1,29 @@
+@startuml component
+package "Frontend" {
+  [Laser Squares Game (HTML/JS)]
+}
+package "AWS Cloud" {
+  [S3: Static Website]
+  [API Gateway]
+  [Lambda: registerPlayer] 
+  [Lambda: movePlayer]
+  [Lambda: shootLaser]
+  [Lambda: getGameState]
+  [Lambda: logout]
+  [DynamoDB: LaserGamePlayers]
+}
+
+[S3: Static Website] --> [Laser Squares Game (HTML/JS)] : Serves files
+[Laser Squares Game (HTML/JS)] --> [API Gateway] : REST API Calls
+[API Gateway] --> [Lambda: registerPlayer]
+[API Gateway] --> [Lambda: movePlayer]
+[API Gateway] --> [Lambda: shootLaser]
+[API Gateway] --> [Lambda: getGameState]
+[API Gateway] --> [Lambda: logout]
+[Lambda: registerPlayer] --> [DynamoDB: LaserGamePlayers]
+[Lambda: movePlayer] --> [DynamoDB: LaserGamePlayers]
+[Lambda: shootLaser] --> [DynamoDB: LaserGamePlayers]
+[Lambda: getGameState] --> [DynamoDB: LaserGamePlayers]
+[Lambda: logout] --> [DynamoDB: LaserGamePlayers]
+
+@enduml
