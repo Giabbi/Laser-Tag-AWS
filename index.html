@@ -186,7 +186,9 @@
         body: JSON.stringify({ name: player, direction }),
       });
       const data = await res.json();
-      document.getElementById("info").innerText = data.result + " | " + data.score;
+      if (data.result != undefined) {
+        document.getElementById("info").innerText = data.result + " | " + data.score;
+      }
     }
   
     // Logout function: calls your logout endpoint to set online:false.
