@@ -1,4 +1,3 @@
-// logout.mjs
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
@@ -6,38 +5,13 @@ const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
 
 export async function handler(event) {
-  // Handle OPTIONS requests if needed
-  if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 200,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,GET,POST"
-      },
-      body: JSON.stringify({})
-    };
-  }
-
-  const body = JSON.parse(event.body);
-  const { name } = body;
-  
-  const params = {
+  const connectionId = event.requestContext.connectionId;
+  await docClient.send(new UpdateCommand({
     TableName: "LaserGamePlayers",
     Key: { name },
-    UpdateExpression: "set online = :status",
-    ExpressionAttributeValues: { ":status": false }
-  };
+    UpdateExpression: "SET online = :false",
+    ExpressionAttributeValues: { ":false": false }
+  }));
 
-  await docClient.send(new UpdateCommand(params));
-
-  return {
-    statusCode: 200,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "OPTIONS,GET,POST"
-    },
-    body: JSON.stringify({ message: "Logged out" })
-  };
+  return { statusCode: 200, body: "" };
 }

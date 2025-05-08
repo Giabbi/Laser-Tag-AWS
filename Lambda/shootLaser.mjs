@@ -1,43 +1,64 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  ScanCommand,
+  UpdateCommand
+} from "@aws-sdk/lib-dynamodb";
+import {
+  ApiGatewayManagementApiClient,
+  PostToConnectionCommand
+} from "@aws-sdk/client-apigatewaymanagementapi";
 
-const client = new DynamoDBClient({});
-const docClient = DynamoDBDocumentClient.from(client);
+const ddb = new DynamoDBClient({});
+const doc = DynamoDBDocumentClient.from(ddb);
 
 export async function handler(event) {
-  const body = JSON.parse(event.body);
-  const { name, direction } = body;
+  // Build WebSocket management client
+  const { domainName, stage, connectionId } = event.requestContext;
+  const apigw = new ApiGatewayManagementApiClient({
+    endpoint: `https://${domainName}/${stage}`
+  });
 
-  // Get the source player's data
-  const getResult = await docClient.send(new GetCommand({
+  // Parse incoming JSON (must include name & direction)
+  const { name, direction } = JSON.parse(event.body);
+
+  // Load the shooter’s record by name
+  const getResult = await doc.send(new GetCommand({
     TableName: "LaserGamePlayers",
     Key: { name }
   }));
 
   if (!getResult.Item) {
-    return {
-      statusCode: 404,
-      headers: { "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ message: "Player not found" })
-    };
+    // Notify client of error
+    const errPayload = JSON.stringify({
+      action: "shootResult",
+      error: "Player not found"
+    });
+    await apigw.send(new PostToConnectionCommand({
+      ConnectionId: connectionId,
+      Data: errPayload
+    }));
+    return { statusCode: 200, body: "Handled missing player" };
   }
 
   const { x, y } = getResult.Item;
 
-  // Scan to find other players
-  const scanResult = await docClient.send(new ScanCommand({ TableName: "LaserGamePlayers" }));
+  // Scan for other players and detect a hit
+  const scanResult = await doc.send(new ScanCommand({
+    TableName: "LaserGamePlayers"
+  }));
 
   let hit = null;
-  for (const player of scanResult.Items) {
+  for (const player of scanResult.Items || []) {
     if (player.name === name) continue;
-
     const dx = player.x - x;
     const dy = player.y - y;
 
     if (
-      (direction === "up" && dx === 0 && dy < 0) ||
-      (direction === "down" && dx === 0 && dy > 0) ||
-      (direction === "left" && dy === 0 && dx < 0) ||
+      (direction === "up"    && dx === 0 && dy < 0) ||
+      (direction === "down"  && dx === 0 && dy > 0) ||
+      (direction === "left"  && dy === 0 && dx < 0) ||
       (direction === "right" && dy === 0 && dx > 0)
     ) {
       hit = player;
@@ -45,9 +66,9 @@ export async function handler(event) {
     }
   }
 
+  // If hit, increment shooter’s score
   if (hit) {
-    // Update the shooter's score
-    await docClient.send(new UpdateCommand({
+    await doc.send(new UpdateCommand({
       TableName: "LaserGamePlayers",
       Key: { name },
       UpdateExpression: "SET score = score + :inc",
@@ -55,16 +76,17 @@ export async function handler(event) {
     }));
   }
 
-  return {
-    statusCode: 200,
-    headers: {
-      "Access-Control-Allow-Origin": "*", 
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "OPTIONS,GET,POST"
-    },
-    body: JSON.stringify({
-      result: hit ? `Hit ${hit.name}` : "Miss",
-      score: hit ? "Point awarded!" : "No change"
-    })
-  };
+  // Build and send the response back over WebSocket
+  const payload = JSON.stringify({
+    action: "shootResult",
+    result: hit ? `Hit ${hit.name}` : "Miss",
+    score: hit ? "Point awarded!" : "Better luck next time!"
+  });
+
+  await apigw.send(new PostToConnectionCommand({
+    ConnectionId: connectionId,
+    Data: payload
+  }));
+
+  return { statusCode: 200, body: "OK" };
 }
