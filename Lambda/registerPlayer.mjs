@@ -5,31 +5,17 @@ const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
 
 export async function handler(event) {
-  const body = JSON.parse(event.body);
-  const { name } = body;
-  const now = Date.now(); 
+  const connectionId = event.requestContext.connectionId;
+  const name = event.queryStringParameters?.name;
+  if (!name) {
+    return { statusCode: 400, body: "Missing name in query string" };
+  }
 
-  const params = {
+  const now = Date.now();
+  await docClient.send(new PutCommand({
     TableName: "LaserGamePlayers",
-    Item: {
-      name,
-      x: 0,
-      y: 0,
-      score: 0,
-      online: true,          
-      lastActive: now        
-    }
-  };
+    Item: { connectionId, name, x: 0, y: 0, score: 0, online: true, lastActive: now }
+  }));
 
-  await docClient.send(new PutCommand(params));
-
-  return {
-    statusCode: 200,
-    headers: {
-      "Access-Control-Allow-Origin": "*", 
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "OPTIONS,GET,POST"
-    },
-    body: JSON.stringify({ message: `Player ${name} registered.` })
-  };
+  return { statusCode: 200, body: "Connected" };
 }

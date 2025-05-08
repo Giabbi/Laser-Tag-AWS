@@ -1,32 +1,37 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  ApiGatewayManagementApiClient,
+  PostToConnectionCommand
+} from "@aws-sdk/client-apigatewaymanagementapi";
 
-const client = new DynamoDBClient({});
-const docClient = DynamoDBDocumentClient.from(client);
+const ddb = new DynamoDBClient({});
+const doc = DynamoDBDocumentClient.from(ddb);
 
-export async function handler() {
-  try {
-    const data = await docClient.send(new ScanCommand({ TableName: "LaserGamePlayers" }));
-    const now = Date.now();
-    // Only include players active in the last 60 seconds (60000 ms)
-    const activePlayers = (data.Items || []).filter(player => 
-      player.lastActive && (now - player.lastActive <= 60000)
-    );
-    return {
-      statusCode: 200,
-      headers: {
-        "Access-Control-Allow-Origin": "*", 
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,GET,POST"
-      },
-      body: JSON.stringify(activePlayers)
-    };
-  } catch (error) {
-    console.error("Error scanning table:", error);
-    return {
-      statusCode: 500,
-      headers: { "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ message: "Internal server error" })
-    };
-  }
+export async function handler(event) {
+  // Build the WebSocket management client for this invocation
+  const { domainName, stage, connectionId } = event.requestContext;
+  const endpoint = `https://${domainName}/${stage}`;
+  const apigw = new ApiGatewayManagementApiClient({ endpoint });
+
+  // Fetch & filter players exactly as before
+  const data = await doc.send(new ScanCommand({ TableName: "LaserGamePlayers" }));
+  const now = Date.now();
+  const activePlayers = (data.Items || []).filter(p =>
+    p.lastActive && now - p.lastActive <= 60_000
+  );
+
+  // Push the JSON back to the caller
+  const payload = JSON.stringify({
+    action: "gameState",      // client‐side can switch on this
+    players: activePlayers
+  });
+
+  await apigw.send(new PostToConnectionCommand({
+    ConnectionId: connectionId,
+    Data: payload
+  }));
+
+  // Return a trivial 200 — the body is ignored for WebSocket routes
+  return { statusCode: 200, body: "OK" };
 }

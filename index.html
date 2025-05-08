@@ -3,117 +3,53 @@
 <head>
   <title>Laser Squares</title>
   <style>
-    html {
-        overflow: hidden;
-    }
+    html { overflow: hidden; }
     body {
-      margin: 0;
-      padding: 20px;
-      background: #222;
-      color: white;
+      margin: 0; padding: 20px;
+      background: #222; color: white;
       font-family: Arial, sans-serif;
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;
-      overflow: hidden;
+      display: flex; flex-direction: column;
+      min-height: 100vh; overflow: hidden;
     }
-    .title {
-      text-align: center;
-      font-size: 2em;
-      margin-bottom: 20px;
-    }
-    .container {
-      flex: 1;
-      display: flex;
-      flex-direction: row;
-      justify-content: center;
-      gap: 20px;
-    }
-    .game-area {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    canvas {
-      background: #111;
-      border: 1px solid #555;
-    }
+    .title { text-align: center; font-size: 2em; margin-bottom: 20px; }
+    .container { flex: 1; display: flex; row-gap: 20px; justify-content: center; gap: 20px; }
+    .game-area { display: flex; flex-direction: column; align-items: center; }
+    canvas { background: #111; border: 1px solid #555; }
     .leaderboard {
-      background: #333;
-      padding: 10px;
+      background: #333; padding: 10px;
       border: 1px solid #555;
-      min-width: 150px;
-      max-width: 200px;
-      height: 400px;
-      overflow-y: auto;
+      min-width: 150px; max-width: 200px;
+      height: 400px; overflow-y: auto;
     }
-    .leaderboard h3 {
-      margin-top: 0;
-    }
-    #info {
-      margin-top: 10px;
-    }
-    /* Login overlay styles */
+    .leaderboard h3 { margin-top: 0; }
+    #info { margin-top: 10px; }
     #loginOverlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.85);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 10;
+      position: fixed; top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85);
+      display: flex; align-items: center;
+      justify-content: center; z-index: 10;
     }
     #loginBox {
-      background: #444;
-      padding: 20px;
-      border: 1px solid #666;
-      border-radius: 5px;
+      background: #444; padding: 20px;
+      border: 1px solid #666; border-radius: 5px;
       text-align: center;
     }
-    #loginBox h2 {
-      margin-top: 0;
-    }
-    #loginBox input[type="text"] {
-      padding: 8px;
-      width: 200px;
-      border: none;
-      border-radius: 3px;
-      margin-bottom: 10px;
-    }
-    #loginBox button {
-      padding: 8px 16px;
-      border: none;
-      border-radius: 3px;
-      background: lime;
-      color: #222;
-      font-weight: bold;
+    #loginBox h2 { margin-top: 0; }
+    #loginBox input { padding: 8px; width: 200px; border: none; border-radius: 3px; margin-bottom: 10px; }
+    #loginBox button, #logoutButton {
+      padding: 8px 16px; border: none;
+      border-radius: 3px; font-weight: bold;
       cursor: pointer;
     }
-    /* Logout button style */
-    #logoutButton {
-      margin-top: 10px;
-      padding: 8px 16px;
-      border: none;
-      border-radius: 3px;
-      background: #e74c3c;
-      color: white;
-      font-weight: bold;
-      cursor: pointer;
-    }
+    #loginBox button { background: lime; color: #222; }
+    #logoutButton { background: #e74c3c; color: white; display: none; margin-top: 10px; }
     footer {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      width: 100%;
-      text-align: center;
-      padding: 30px 0;
-      background: #222;
+      position: fixed; bottom: 0; left: 0;
+      width: 100%; text-align: center;
+      padding: 30px 0; background: #222;
       border-top: 1px solid #555;
     }
-
   </style>
 </head>
 <body>
@@ -122,16 +58,14 @@
     <div class="game-area">
       <canvas id="game" width="400" height="400"></canvas>
       <div id="info"></div>
-      <!-- Logout button; it appears after login -->
-      <button id="logoutButton" style="display:none;">Logout</button>
+      <button id="logoutButton">Logout</button>
     </div>
     <div class="leaderboard">
       <h3>Leaderboard</h3>
-      <ul id="leaderboardList" style="list-style: none; padding: 0;"></ul>
+      <ul id="leaderboardList" style="list-style:none; padding:0;"></ul>
     </div>
   </div>
-  
-  <!-- Login overlay -->
+
   <div id="loginOverlay">
     <div id="loginBox">
       <h2>Welcome to Laser Squares</h2>
@@ -141,208 +75,174 @@
       <button id="loginButton">Join Game</button>
     </div>
   </div>
-  
-  <footer>
-    Made by Giancarlo Umberto Ambrosino
-  </footer>
-  
+
+  <footer>Made by Giancarlo Umberto Ambrosino</footer>
+
   <script>
-    // API base URL (without trailing slash)
-    const api = "https://b6025qw9f1.execute-api.us-east-2.amazonaws.com/default";
+    const wsUrl = "wss://besdqwvktd.execute-api.us-east-2.amazonaws.com/production";
+    let socket;
     let player = "";
-    
-    const canvas = document.getElementById("game");
-    const ctx = canvas.getContext("2d");
-    const logoutButton = document.getElementById("logoutButton");
   
+    const canvas = document.getElementById("game");
+    const ctx    = canvas.getContext("2d");
+    const logoutButton = document.getElementById("logoutButton");
     const gridSize = 10;
     const cellSize = canvas.width / gridSize;
   
-    // Global arrays for game state and projectiles.
-    let playerList = [];
-    let localPlayerPos = { x: 0, y: 0 };  
-    let projectiles = [];
+    let playerList     = [];
+    let localPlayerPos = { x:0, y:0 };
+    let projectiles    = [];
   
-    // Register player (updates record with online: true and lastActive timestamp)
-    async function registerPlayer() {
-      await fetch(`${api}/registerPlayer`, {
-        method: "POST",
-        body: JSON.stringify({ name: player }),
-      });
-    }
-  
-    // Move player (also should update online: true, lastActive, etc.)
-    async function movePlayer(direction) {
-      await fetch(`${api}/movePlayer`, {
-        method: "POST",
-        body: JSON.stringify({ name: player, direction }),
-      });
-    }
-  
-    // Shoot function.
-    async function shoot(direction) {
-      const res = await fetch(`${api}/shootLaser`, {
-        method: "POST",
-        body: JSON.stringify({ name: player, direction }),
-      });
-      const data = await res.json();
-      if (data.result != undefined) {
-        document.getElementById("info").innerText = data.result + " | " + data.score;
-      } else
-      {
-        document.getElementById("info").innerText = "Move using arrows and shoot using WASD" 
+    function safeSend(obj) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(obj));
       }
     }
   
-    // Logout function: calls your logout endpoint to set online:false.
-    async function logout() {
-      await fetch(`${api}/logout`, {
-        method: "POST",
-        body: JSON.stringify({ name: player }),
-      });
-      alert("You have logged out.");
-      // Reload the page to show the login overlay again.
-      location.reload();
-    }
+    function connectSocket() {
+      socket = new WebSocket(`${wsUrl}?name=${encodeURIComponent(player)}`);
   
-    // Fetch game state (this returns all players from the database)
-    async function fetchGameState() {
-      try {
-        const res = await fetch(`${api}/getGameState`);
-        const players = await res.json();
-        playerList = players;
+      socket.onopen = () => {
+        // Prime the board once
+        safeSend({ action: "getGameState" });
   
-        // Update our local position if found.
-        const me = players.find(p => p.name === player);
-        if (me) {
-          localPlayerPos.x = me.x;
-          localPlayerPos.y = me.y;
+        // Now wire up keypresses
+        document.addEventListener("keydown", handleKey);
+  
+        // Start render loop
+        requestAnimationFrame(animationLoop);
+      };
+  
+      socket.onmessage = ({ data }) => {
+        const msg = JSON.parse(data);
+        console.log("WS ←", msg);               
+        switch (msg.action) {
+          case "gameState":
+            // full board state
+            playerList = msg.players;
+            const me = playerList.find(p => p.name === player);
+            if (me) {
+              localPlayerPos.x = me.x;
+              localPlayerPos.y = me.y;
+            }
+            updateLeaderboard();
+            break;
+  
+          case "playerMoved":
+            // server told us someone moved
+            console.log("got playerMoved for", msg.name, "to", msg.x, msg.y);  // <-- and this
+            const mover = playerList.find(p => p.name === msg.name);
+            if (mover) {
+              mover.x = msg.x;
+              mover.y = msg.y;
+            }
+            // if it's us, update localPlayerPos
+            if (msg.name === player) {
+              localPlayerPos.x = msg.x;
+              localPlayerPos.y = msg.y;
+            }
+            break;
+  
+          case "shootResult":
+            document.getElementById("info").innerText = `${msg.result} | ${msg.score}`;
+            break;
         }
+      };
   
-        updateLeaderboard();
-      } catch (err) {
-        console.error("Error fetching game state:", err);
+      socket.onclose = () => {
+        alert("Disconnected from server");
+        location.reload();
+      };
+  
+      socket.onerror = err => console.error("WebSocket error:", err);
+    }
+  
+    function handleKey(e) {
+      const moveKeys  = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right" };
+      const shootKeys = { KeyW:"up", KeyS:"down", KeyA:"left", KeyD:"right" };
+  
+      if (moveKeys[e.code]) {
+        safeSend({ action:"movePlayer", name:player, direction:moveKeys[e.code] });
+      }
+      else if (shootKeys[e.code]) {
+        addProjectile(shootKeys[e.code]);
+        safeSend({ action:"shoot", name:player, direction:shootKeys[e.code] });
       }
     }
   
-    // Update leaderboard display (all players regardless of online status).
     function updateLeaderboard() {
       const lbEl = document.getElementById("leaderboardList");
       lbEl.innerHTML = "";
-      const sorted = playerList.slice().sort((a, b) => b.score - a.score);
-      sorted.forEach((p) => {
-        const li = document.createElement("li");
-        li.textContent = `${p.name}: ${p.score}`;
-        lbEl.appendChild(li);
+      playerList
+        .slice().sort((a,b)=>b.score - a.score)
+        .forEach(p => {
+          const li = document.createElement("li");
+          li.textContent = `${p.name}: ${p.score}`;
+          lbEl.appendChild(li);
+        });
+    }
+  
+    function render() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      playerList.filter(p=>p.online).forEach(p=>{
+        ctx.fillStyle = p.name===player ? "lime" : "red";
+        ctx.fillRect(p.x*cellSize,p.y*cellSize,cellSize-2,cellSize-2);
+      });
+      projectiles.forEach(proj=>{
+        ctx.fillStyle="yellow";
+        ctx.beginPath();
+        ctx.arc(
+          proj.x*cellSize + cellSize/2,
+          proj.y*cellSize + cellSize/2,
+          cellSize/8,
+          0,Math.PI*2
+        );
+        ctx.fill();
       });
     }
   
-    // Render game arena—only draw players that are online.
-    function render() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
-      // Draw only online players in the game field.
-      const onlinePlayers = playerList.filter(p => p.online);
-      for (const p of onlinePlayers) {
-        ctx.fillStyle = (p.name === player) ? "lime" : "red";
-        ctx.fillRect(p.x * cellSize, p.y * cellSize, cellSize - 2, cellSize - 2);
-      }
-  
-      // Draw projectiles as yellow circles.
-      for (const proj of projectiles) {
-        ctx.fillStyle = "yellow";
-        ctx.beginPath();
-        ctx.arc(proj.x * cellSize + cellSize / 2, proj.y * cellSize + cellSize / 2, cellSize / 8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  
-    // Update projectile positions.
     function updateProjectiles(deltaTime) {
-      const speed = 5; // cells per second.
-      const distance = speed * (deltaTime / 1000);
-      for (const proj of projectiles) {
-        switch (proj.direction) {
-          case "up": proj.y -= distance; break;
-          case "down": proj.y += distance; break;
-          case "left": proj.x -= distance; break;
-          case "right": proj.x += distance; break;
-        }
+      const speed = 5, dist = speed*(deltaTime/1000);
+      projectiles.forEach(proj=>{
+        if      (proj.direction==="up")    proj.y -= dist;
+        else if (proj.direction==="down")  proj.y += dist;
+        else if (proj.direction==="left")  proj.x -= dist;
+        else if (proj.direction==="right") proj.x += dist;
         proj.life -= deltaTime;
-      }
-      projectiles = projectiles.filter(proj =>
-        proj.life > 0 &&
-        proj.x >= 0 && proj.x < gridSize &&
-        proj.y >= 0 && proj.y < gridSize
+      });
+      projectiles = projectiles.filter(proj=>
+        proj.life>0 && proj.x>=0 && proj.x<gridSize && proj.y>=0 && proj.y<gridSize
       );
     }
   
-    // Animation loop for smooth rendering.
-    function animationLoop(timestamp) {
-      if (!animationLoop.lastTimestamp) animationLoop.lastTimestamp = timestamp;
-      const deltaTime = timestamp - animationLoop.lastTimestamp;
-      animationLoop.lastTimestamp = timestamp;
+    function animationLoop(ts) {
+      if (!animationLoop.lastTs) animationLoop.lastTs = ts;
+      const dt = ts - animationLoop.lastTs;
+      animationLoop.lastTs = ts;
   
-      updateProjectiles(deltaTime);
+      updateProjectiles(dt);
       render();
-  
       requestAnimationFrame(animationLoop);
     }
   
-    // When shooting, add a projectile starting at the local player's position.
     function addProjectile(direction) {
-      projectiles.push({
-        x: localPlayerPos.x,
-        y: localPlayerPos.y,
-        direction: direction,
-        life: 1000  // lifespan in ms
-      });
+      projectiles.push({ x:localPlayerPos.x, y:localPlayerPos.y, direction, life:1000 });
     }
   
-    // Key handling: Arrow keys for movement; WASD for shooting.
-    document.addEventListener("keydown", async (e) => {
-      const moveKeys = {
-        ArrowUp: "up", ArrowDown: "down",
-        ArrowLeft: "left", ArrowRight: "right"
-      };
-      const shootKeys = {
-        KeyW: "up", KeyS: "down",
-        KeyA: "left", KeyD: "right"
-      };
-  
-      if (moveKeys[e.code]) {
-        await movePlayer(moveKeys[e.code]);
-        await fetchGameState();
-      } else if (shootKeys[e.code]) {
-        await shoot(shootKeys[e.code]);
-        addProjectile(shootKeys[e.code]);
-      }
-    });
-  
-    // Poll game state periodically.
-    setInterval(fetchGameState, 2000);
-  
-    // Login form logic.
+    // Login logic
     const loginOverlay = document.getElementById("loginOverlay");
-    const loginButton = document.getElementById("loginButton");
-    loginButton.addEventListener("click", async () => {
-      const input = document.getElementById("playerNameInput");
-      const nameValue = input.value.trim();
-      if (nameValue) {
-        player = nameValue;
-        loginOverlay.style.display = "none";
-        // Show the Logout button after login.
-        logoutButton.style.display = "block";
-        await registerPlayer();
-        await fetchGameState();
-        requestAnimationFrame(animationLoop);
-      }
+    const loginButton  = document.getElementById("loginButton");
+    loginButton.addEventListener("click",()=>{
+      const name = document.getElementById("playerNameInput").value.trim();
+      if(!name) return;
+      player = name;
+      loginOverlay.style.display = "none";
+      logoutButton.style.display  = "block";
+      connectSocket();
     });
   
-    // Set up Logout button click handler.
-    logoutButton.addEventListener("click", async () => {
-      await logout();
-    });
+    logoutButton.addEventListener("click",()=>socket.close());
   </script>
+  
 </body>
 </html>
