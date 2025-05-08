@@ -13,6 +13,31 @@ import {
 const ddb = new DynamoDBClient({});
 const doc = DynamoDBDocumentClient.from(ddb);
 
+async function broadcastToAll(doc, apigw, Items, payload) {
+  await Promise.all(Items.map(async item => {
+    const conn = item.connectionId;
+    try {
+      await apigw.send(new PostToConnectionCommand({
+        ConnectionId: conn,
+        Data: payload
+      }));
+    } catch (err) {
+      // 410 = GoneException
+      if (err.name === "GoneException" || err.$metadata?.httpStatusCode === 410) {
+        console.log(`Cleaning up stale connection ${conn} for player ${item.name}`);
+        // remove the stale connectionId from the player's record
+        await doc.send(new UpdateCommand({
+          TableName: "LaserGamePlayers",
+          Key: { name: item.name },
+          UpdateExpression: "REMOVE connectionId"
+        }));
+      } else {
+        console.error("Failed to broadcast to", conn, err);
+      }
+    }
+  }));
+}
+
 export async function handler(event) {
   // Build WebSocket management client
   const { domainName, stage, connectionId } = event.requestContext;
@@ -76,17 +101,24 @@ export async function handler(event) {
     }));
   }
 
-  // Build and send the response back over WebSocket
+  // Broadcast to everyone via the GSI
+  const { Items = [] } = await doc.send(new ScanCommand({
+    TableName: "LaserGamePlayers",
+    IndexName: "ConnectionId",
+    ProjectionExpression: "connectionId, #nm",
+    ExpressionAttributeNames: { 
+      "#nm": "name" 
+    }
+  }));
+  
+
   const payload = JSON.stringify({
     action: "shootResult",
+    name,
     result: hit ? `Hit ${hit.name}` : "Miss",
     score: hit ? "Point awarded!" : "Better luck next time!"
   });
-
-  await apigw.send(new PostToConnectionCommand({
-    ConnectionId: connectionId,
-    Data: payload
-  }));
-
+  await broadcastToAll(doc, apigw, Items, payload);
+  
   return { statusCode: 200, body: "OK" };
 }

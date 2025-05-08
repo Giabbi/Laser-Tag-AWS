@@ -8,7 +8,7 @@ export async function handler(event) {
   const connectionId = event.requestContext.connectionId;
   await docClient.send(new UpdateCommand({
     TableName: "LaserGamePlayers",
-    Key: { name },
+    Key: { name: event.queryStringParameters?.name},
     UpdateExpression: "SET online = :false",
     ExpressionAttributeValues: { ":false": false }
   }));

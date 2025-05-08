@@ -79,37 +79,46 @@
   <footer>Made by Giancarlo Umberto Ambrosino</footer>
 
   <script>
-    // WebSocket endpoint 
-    const wsUrl = "wss://besdqwvktd.execute-api.us-east-2.amazonaws.com/production/";
+    const wsUrl = "wss://besdqwvktd.execute-api.us-east-2.amazonaws.com/production";
     let socket;
     let player = "";
-
+  
     const canvas = document.getElementById("game");
-    const ctx = canvas.getContext("2d");
+    const ctx    = canvas.getContext("2d");
     const logoutButton = document.getElementById("logoutButton");
-
     const gridSize = 10;
     const cellSize = canvas.width / gridSize;
-
-    let playerList = [];
-    let localPlayerPos = { x: 0, y: 0 };
-    let projectiles = [];
-
+  
+    let playerList     = [];
+    let localPlayerPos = { x:0, y:0 };
+    let projectiles    = [];
+  
+    function safeSend(obj) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(obj));
+      }
+    }
+  
     function connectSocket() {
       socket = new WebSocket(`${wsUrl}?name=${encodeURIComponent(player)}`);
-
+  
       socket.onopen = () => {
-        // request gameState every 2 seconds
-        setInterval(() => {
-          socket.send(JSON.stringify({ action: "getGameState" }));
-        }, 2000);
+        // Prime the board once
+        safeSend({ action: "getGameState" });
+  
+        // Now wire up keypresses
+        document.addEventListener("keydown", handleKey);
+  
+        // Start render loop
         requestAnimationFrame(animationLoop);
       };
-
+  
       socket.onmessage = ({ data }) => {
         const msg = JSON.parse(data);
+        console.log("WS ←", msg);               
         switch (msg.action) {
           case "gameState":
+            // full board state
             playerList = msg.players;
             const me = playerList.find(p => p.name === player);
             if (me) {
@@ -118,126 +127,122 @@
             }
             updateLeaderboard();
             break;
-
+  
           case "playerMoved":
-            localPlayerPos.x = msg.x;
-            localPlayerPos.y = msg.y;
+            // server told us someone moved
+            console.log("got playerMoved for", msg.name, "to", msg.x, msg.y);  // <-- and this
+            const mover = playerList.find(p => p.name === msg.name);
+            if (mover) {
+              mover.x = msg.x;
+              mover.y = msg.y;
+            }
+            // if it's us, update localPlayerPos
+            if (msg.name === player) {
+              localPlayerPos.x = msg.x;
+              localPlayerPos.y = msg.y;
+            }
             break;
-
+  
           case "shootResult":
             document.getElementById("info").innerText = `${msg.result} | ${msg.score}`;
             break;
         }
       };
-
+  
       socket.onclose = () => {
         alert("Disconnected from server");
         location.reload();
       };
-
+  
       socket.onerror = err => console.error("WebSocket error:", err);
     }
-
-    function movePlayer(direction) {
-      socket.send(JSON.stringify({ action: "playerMove", name: player, direction }));
+  
+    function handleKey(e) {
+      const moveKeys  = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right" };
+      const shootKeys = { KeyW:"up", KeyS:"down", KeyA:"left", KeyD:"right" };
+  
+      if (moveKeys[e.code]) {
+        safeSend({ action:"movePlayer", name:player, direction:moveKeys[e.code] });
+      }
+      else if (shootKeys[e.code]) {
+        addProjectile(shootKeys[e.code]);
+        safeSend({ action:"shoot", name:player, direction:shootKeys[e.code] });
+      }
     }
-
-    function shoot(direction) {
-      addProjectile(direction);
-      socket.send(JSON.stringify({ action: "shoot", name: player, direction }));
-    }
-
-    function logout() {
-      socket.close();
-    }
-
+  
     function updateLeaderboard() {
       const lbEl = document.getElementById("leaderboardList");
       lbEl.innerHTML = "";
-      const sorted = playerList.slice().sort((a, b) => b.score - a.score);
-      sorted.forEach(p => {
-        const li = document.createElement("li");
-        li.textContent = `${p.name}: ${p.score}`;
-        lbEl.appendChild(li);
-      });
+      playerList
+        .slice().sort((a,b)=>b.score - a.score)
+        .forEach(p => {
+          const li = document.createElement("li");
+          li.textContent = `${p.name}: ${p.score}`;
+          lbEl.appendChild(li);
+        });
     }
-
+  
     function render() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const onlinePlayers = playerList.filter(p => p.online);
-      onlinePlayers.forEach(p => {
-        ctx.fillStyle = p.name === player ? "lime" : "red";
-        ctx.fillRect(p.x * cellSize, p.y * cellSize, cellSize - 2, cellSize - 2);
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      playerList.filter(p=>p.online).forEach(p=>{
+        ctx.fillStyle = p.name===player ? "lime" : "red";
+        ctx.fillRect(p.x*cellSize,p.y*cellSize,cellSize-2,cellSize-2);
       });
-
-      projectiles.forEach(proj => {
-        ctx.fillStyle = "yellow";
+      projectiles.forEach(proj=>{
+        ctx.fillStyle="yellow";
         ctx.beginPath();
         ctx.arc(
-          proj.x * cellSize + cellSize / 2,
-          proj.y * cellSize + cellSize / 2,
-          cellSize / 8,
-          0, Math.PI * 2
+          proj.x*cellSize + cellSize/2,
+          proj.y*cellSize + cellSize/2,
+          cellSize/8,
+          0,Math.PI*2
         );
         ctx.fill();
       });
     }
-
+  
     function updateProjectiles(deltaTime) {
-      const speed = 5;
-      const distance = speed * (deltaTime / 1000);
-      projectiles.forEach(proj => {
-        switch (proj.direction) {
-          case "up": proj.y -= distance; break;
-          case "down": proj.y += distance; break;
-          case "left": proj.x -= distance; break;
-          case "right": proj.x += distance; break;
-        }
+      const speed = 5, dist = speed*(deltaTime/1000);
+      projectiles.forEach(proj=>{
+        if      (proj.direction==="up")    proj.y -= dist;
+        else if (proj.direction==="down")  proj.y += dist;
+        else if (proj.direction==="left")  proj.x -= dist;
+        else if (proj.direction==="right") proj.x += dist;
         proj.life -= deltaTime;
       });
-      projectiles = projectiles.filter(proj =>
-        proj.life > 0 && proj.x >= 0 && proj.x < gridSize && proj.y >= 0 && proj.y < gridSize
+      projectiles = projectiles.filter(proj=>
+        proj.life>0 && proj.x>=0 && proj.x<gridSize && proj.y>=0 && proj.y<gridSize
       );
     }
-
-    function animationLoop(timestamp) {
-      if (!animationLoop.lastTimestamp) animationLoop.lastTimestamp = timestamp;
-      const deltaTime = timestamp - animationLoop.lastTimestamp;
-      animationLoop.lastTimestamp = timestamp;
-
-      updateProjectiles(deltaTime);
+  
+    function animationLoop(ts) {
+      if (!animationLoop.lastTs) animationLoop.lastTs = ts;
+      const dt = ts - animationLoop.lastTs;
+      animationLoop.lastTs = ts;
+  
+      updateProjectiles(dt);
       render();
       requestAnimationFrame(animationLoop);
     }
-
+  
     function addProjectile(direction) {
-      projectiles.push({ x: localPlayerPos.x, y: localPlayerPos.y, direction, life: 1000 });
+      projectiles.push({ x:localPlayerPos.x, y:localPlayerPos.y, direction, life:1000 });
     }
-
-    document.addEventListener("keydown", e => {
-      const moveKeys = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
-      const shootKeys = { KeyW: "up", KeyS: "down", KeyA: "left", KeyD: "right" };
-
-      if (moveKeys[e.code]) {
-        movePlayer(moveKeys[e.code]);
-      } else if (shootKeys[e.code]) {
-        shoot(shootKeys[e.code]);
-      }
-    });
-
+  
+    // Login logic
     const loginOverlay = document.getElementById("loginOverlay");
-    const loginButton = document.getElementById("loginButton");
-    loginButton.addEventListener("click", () => {
-      const input = document.getElementById("playerNameInput");
-      const nameValue = input.value.trim();
-      if (!nameValue) return;
-      player = nameValue;
+    const loginButton  = document.getElementById("loginButton");
+    loginButton.addEventListener("click",()=>{
+      const name = document.getElementById("playerNameInput").value.trim();
+      if(!name) return;
+      player = name;
       loginOverlay.style.display = "none";
-      logoutButton.style.display = "block";
+      logoutButton.style.display  = "block";
       connectSocket();
     });
-
-    logoutButton.addEventListener("click", logout);
+  
+    logoutButton.addEventListener("click",()=>socket.close());
   </script>
+  
 </body>
 </html>
