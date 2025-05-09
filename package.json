@@ -13,5 +13,8 @@
     "@aws-sdk/client-dynamodb": "^3.788.0",
     "@aws-sdk/lib-dynamodb": "^3.788.0",
     "three": "^0.175.0"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5"
   }
 }

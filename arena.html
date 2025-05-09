@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Laser Cubes – Climbable Ramps + Accurate Bullets</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #111; }
+    canvas { display: block; cursor: crosshair; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.150.0/build/three.module.js';
+
+    // ─── SETTINGS ──────────────────────────────────────────────────────────
+    const gridSize       = 15;
+    const spacing        = 1.8;
+    const cubeSize       = 1;
+    const eyeHeight      = cubeSize - 0.2;  // camera just inside cube top
+    const halfSize       = (gridSize * spacing) / 2;
+    const wallThickness  = 0.2;
+    const wallHeight     = 2;
+    const collisionMargin= cubeSize / 2;
+    const moveSpeed      = 5;
+    const lookSens       = 0.002;
+    const bulletSpeed    = 20;
+    const bulletLife     = 3.0;
+    const bulletRadius   = 0.2;
+    const fireInterval   = 1.0;
+
+    // ─── CORE SETUP ─────────────────────────────────────────────────────────
+    const scene    = new THREE.Scene();
+    const camera   = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setSize(innerWidth, innerHeight);
+    document.body.appendChild(renderer.domElement);
+    renderer.domElement.addEventListener('click', () =>
+      renderer.domElement.requestPointerLock()
+    );
+
+    // First‐person “head”
+    const head = new THREE.Object3D();
+    head.position.set(0, eyeHeight, 0);
+    head.add(camera);
+    scene.add(head);
+
+    // Mouse‐look
+    let yaw = 0, pitch = 0;
+    document.addEventListener('mousemove', e => {
+      if (document.pointerLockElement === renderer.domElement) {
+        yaw   -= e.movementX * lookSens;
+        pitch -= e.movementY * lookSens;
+        pitch  = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+        head.rotation.y   = yaw;
+        camera.rotation.x = pitch;
+      }
+    });
+
+    // ─── LIGHTING ───────────────────────────────────────────────────────────
+    scene.add(new THREE.AmbientLight   (0x404040, 1.5));
+    scene.add(new THREE.HemisphereLight(0xeeeeff, 0x444422, 0.6));
+    const headLight = new THREE.PointLight(0xffffff, 0.8);
+    camera.add(headLight);
+
+    // ─── FLOOR ──────────────────────────────────────────────────────────────
+    const loader   = new THREE.TextureLoader();
+    const floorTex = loader.load('https://threejs.org/examples/textures/checker.png', t => {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(gridSize, gridSize);
+    });
+    const floorMat = new THREE.MeshStandardMaterial({
+      map: floorTex, roughness:0.8, metalness:0.2
+    });
+    const floorGeo = new THREE.PlaneGeometry(gridSize*spacing, gridSize*spacing);
+    const floor    = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI/2;
+    scene.add(floor);
+
+    // ─── WALLS ──────────────────────────────────────────────────────────────
+    const wallMat  = new THREE.MeshStandardMaterial({ color:0x222222, roughness:0.9 });
+    const wallGeoX = new THREE.BoxGeometry(gridSize*spacing + wallThickness*2, wallHeight, wallThickness);
+    const wallGeoZ = new THREE.BoxGeometry(wallThickness, wallHeight, gridSize*spacing + wallThickness*2);
+    [-1,1].forEach(dir => {
+      const n = new THREE.Mesh(wallGeoX, wallMat);
+      n.position.set(0, wallHeight/2, dir*(halfSize + wallThickness/2));
+      scene.add(n);
+      const e = new THREE.Mesh(wallGeoZ, wallMat);
+      e.position.set(dir*(halfSize + wallThickness/2), wallHeight/2, 0);
+      scene.add(e);
+    });
+
+    // ─── RAMP OBSTACLES ─────────────────────────────────────────────────────
+    const obstacles = [];
+    const rampGeo = new THREE.ConeGeometry(2, 2, 4);
+    const rampMat = new THREE.MeshStandardMaterial({ color:0x555555, roughness:0.7 });
+    const rampPositions = [
+      [2,2], [4,8], [8,2], [12,12], [7,7],
+      [3,12],[10,4],[5,14], [14,5], [11,9]
+    ];
+    for (const [gx, gy] of rampPositions) {
+      const ramp = new THREE.Mesh(rampGeo, rampMat);
+      ramp.position.set(
+        (gx - gridSize/2)*spacing,
+         1,  // half ramp height
+        (gy - gridSize/2)*spacing
+      );
+      ramp.rotation.y = Math.PI/4;
+      scene.add(ramp);
+      obstacles.push({
+        mesh:     ramp,
+        halfBase: 2,
+        height:   2,
+        invRot:   -Math.PI/4  // for transforming points
+      });
+    }
+
+    // ─── PLAYERS ─────────────────────────────────────────────────────────────
+    const players = {};
+    function spawnPlayer(name, x, y, color) {
+      if (name==='You') return;
+      const geo = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+      const mat = new THREE.MeshLambertMaterial({ color });
+      const m   = new THREE.Mesh(geo, mat);
+      m.position.set(
+        (x - gridSize/2)*spacing,
+         cubeSize/2,
+        (y - gridSize/2)*spacing
+      );
+      scene.add(m);
+      players[name] = m;
+    }
+    function movePlayer(name, x, y) {
+      const px = (x - gridSize/2)*spacing;
+      const pz = (y - gridSize/2)*spacing;
+      if (name==='You') {
+        head.position.x = px;
+        head.position.z = pz;
+      } else if (players[name]) {
+        players[name].position.set(px, cubeSize/2, pz);
+      }
+    }
+
+    // DEMO SPAWN
+    spawnPlayer('You',  2, 3, 0x00ff00);
+    spawnPlayer('Them', 5, 5, 0xff0000);
+
+    // ─── INPUT & PROJECTILES ─────────────────────────────────────────────────
+    let fw=false, bw=false, lt=false, rt=false;
+    document.addEventListener('keydown', e => {
+      if (e.code==='KeyW') fw=true;
+      if (e.code==='KeyS') bw=true;
+      if (e.code==='KeyA') lt=true;
+      if (e.code==='KeyD') rt=true;
+      if (e.code==='Space') shoot();
+    });
+    document.addEventListener('keyup', e => {
+      if (e.code==='KeyW') fw=false;
+      if (e.code==='KeyS') bw=false;
+      if (e.code==='KeyA') lt=false;
+      if (e.code==='KeyD') rt=false;
+    });
+
+    const projectiles = [];
+    let lastShot = 0;
+    const clock  = new THREE.Clock();
+
+    function shoot() {
+      const now = clock.getElapsedTime();
+      if (now - lastShot < fireInterval) return;
+      lastShot = now;
+      const bgeo = new THREE.SphereGeometry(bulletRadius, 8, 8);
+      const bmat = new THREE.MeshBasicMaterial({ color:0xffff00 });
+      const b    = new THREE.Mesh(bgeo, bmat);
+      camera.getWorldPosition(b.position);
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir).normalize();
+      scene.add(b);
+      projectiles.push({ mesh:b, velocity:dir.multiplyScalar(bulletSpeed), life:bulletLife });
+    }
+
+    // ─── ANIMATE ─────────────────────────────────────────────────────────────
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt   = clock.getDelta();
+      const dist = moveSpeed * dt;
+
+      // Movement
+      if (fw) head.translateZ(-dist);
+      if (bw) head.translateZ( dist);
+      if (lt) head.translateX(-dist);
+      if (rt) head.translateX( dist);
+
+      // Clamp inside walls
+      head.position.x = Math.max(-halfSize+collisionMargin, Math.min(halfSize-collisionMargin, head.position.x));
+      head.position.z = Math.max(-halfSize+collisionMargin, Math.min(halfSize-collisionMargin, head.position.z));
+
+      // ─── CLIMBING ────────────────────────────────
+      let groundY = 0;
+      for (const obs of obstacles) {
+        // world → local
+        const dx = head.position.x - obs.mesh.position.x;
+        const dz = head.position.z - obs.mesh.position.z;
+        const c  = Math.cos(obs.invRot), s = Math.sin(obs.invRot);
+        const lx = dx * c - dz * s;
+        const lz = dx * s + dz * c;
+        if (Math.abs(lx) <= obs.halfBase && Math.abs(lz) <= obs.halfBase) {
+          const m = Math.max(Math.abs(lx), Math.abs(lz));
+          const h = obs.height * (1 - m/obs.halfBase);
+          groundY = Math.max(groundY, h);
+        }
+      }
+      head.position.y = groundY + eyeHeight;
+
+      // ─── BULLET UPDATE & COLLISION ────────────────
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        p.mesh.position.addScaledVector(p.velocity, dt);
+        p.life -= dt;
+        let dead = p.life <= 0 || p.mesh.position.y <= bulletRadius;
+
+        // Collide with players
+        if (!dead) {
+          for (const nm in players) {
+            const box = new THREE.Box3().setFromObject(players[nm]);
+            if (box.containsPoint(p.mesh.position)) { dead = true; break; }
+          }
+        }
+
+        // Collide with ramps accurately
+        if (!dead) {
+          for (const obs of obstacles) {
+            const pos = p.mesh.position;
+            const dx  = pos.x - obs.mesh.position.x;
+            const dz  = pos.z - obs.mesh.position.z;
+            const c   = Math.cos(obs.invRot), s = Math.sin(obs.invRot);
+            const lx  = dx * c - dz * s;
+            const lz  = dx * s + dz * c;
+            if (Math.abs(lx) <= obs.halfBase && Math.abs(lz) <= obs.halfBase) {
+              const m = Math.max(Math.abs(lx), Math.abs(lz));
+              const h = obs.height * (1 - m/obs.halfBase);
+              if (pos.y <= h + bulletRadius) { dead = true; break; }
+            }
+          }
+        }
+
+        if (dead) {
+          scene.remove(p.mesh);
+          projectiles.splice(i, 1);
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // ─── RESIZE ─────────────────────────────────────────────────────────────
+    window.addEventListener('resize', () => {
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>
