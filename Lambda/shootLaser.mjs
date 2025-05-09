@@ -1,3 +1,4 @@
+// shootLaser.mjs
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
@@ -13,86 +14,99 @@ import {
 const ddb = new DynamoDBClient({});
 const doc = DynamoDBDocumentClient.from(ddb);
 
-async function broadcastToAll(doc, apigw, Items, payload) {
+// helper to broadcast to all connections
+async function broadcastToAll(apigw, Items, payload) {
   await Promise.all(Items.map(async item => {
-    const conn = item.connectionId;
     try {
       await apigw.send(new PostToConnectionCommand({
-        ConnectionId: conn,
+        ConnectionId: item.connectionId,
         Data: payload
       }));
     } catch (err) {
-      // 410 = GoneException
+      // clean up stale
       if (err.name === "GoneException" || err.$metadata?.httpStatusCode === 410) {
-        console.log(`Cleaning up stale connection ${conn} for player ${item.name}`);
-        // remove the stale connectionId from the player's record
         await doc.send(new UpdateCommand({
           TableName: "LaserGamePlayers",
           Key: { name: item.name },
           UpdateExpression: "REMOVE connectionId"
         }));
-      } else {
-        console.error("Failed to broadcast to", conn, err);
       }
     }
   }));
 }
 
 export async function handler(event) {
-  // Build WebSocket management client
   const { domainName, stage, connectionId } = event.requestContext;
   const apigw = new ApiGatewayManagementApiClient({
     endpoint: `https://${domainName}/${stage}`
   });
 
-  // Parse incoming JSON (must include name & direction)
-  const { name, direction } = JSON.parse(event.body);
+  // 1) Parse shooter + 3D ray info
+  const { name, origin, direction } = JSON.parse(event.body);
+  if (!name || !origin || !direction) {
+    // malformed request
+    await apigw.send(new PostToConnectionCommand({
+      ConnectionId: connectionId,
+      Data: JSON.stringify({
+        action: "shootResult",
+        error: "Invalid shoot payload"
+      })
+    }));
+    return { statusCode: 400 };
+  }
 
-  // Load the shooter’s record by name
-  const getResult = await doc.send(new GetCommand({
+  // 2) Verify shooter exists
+  const shooter = await doc.send(new GetCommand({
     TableName: "LaserGamePlayers",
     Key: { name }
   }));
-
-  if (!getResult.Item) {
-    // Notify client of error
-    const errPayload = JSON.stringify({
-      action: "shootResult",
-      error: "Player not found"
-    });
+  if (!shooter.Item) {
     await apigw.send(new PostToConnectionCommand({
       ConnectionId: connectionId,
-      Data: errPayload
+      Data: JSON.stringify({
+        action: "shootResult",
+        error: "Player not found"
+      })
     }));
-    return { statusCode: 200, body: "Handled missing player" };
+    return { statusCode: 200 };
   }
 
-  const { x, y } = getResult.Item;
-
-  // Scan for other players and detect a hit
-  const scanResult = await doc.send(new ScanCommand({
+  // 3) Scan all players to find nearest intersection
+  const scan = await doc.send(new ScanCommand({
     TableName: "LaserGamePlayers"
   }));
 
-  let hit = null;
-  for (const player of scanResult.Items || []) {
-    if (player.name === name) continue;
-    const dx = player.x - x;
-    const dy = player.y - y;
+  let closest = { player: null, t: Infinity };
+  const radius = 0.5;  // approximate player size
 
-    if (
-      (direction === "up"    && dx === 0 && dy < 0) ||
-      (direction === "down"  && dx === 0 && dy > 0) ||
-      (direction === "left"  && dy === 0 && dx < 0) ||
-      (direction === "right" && dy === 0 && dx > 0)
-    ) {
-      hit = player;
-      break;
+  for (const p of scan.Items || []) {
+    if (p.name === name) continue;
+
+    // player center in world‐grid space: x→X, y→Z, assume Y at 0.5
+    const cx = p.x, cy = 0.5, cz = p.y;
+    // vector from ray origin to center
+    const ocx = cx - origin.x;
+    const ocy = cy - origin.y;
+    const ocz = cz - origin.z;
+    // project oc onto dir
+    const tca = ocx*direction.x + ocy*direction.y + ocz*direction.z;
+    if (tca < 0) continue;  // behind shooter
+
+    // squared distance from center to ray
+    const d2 = ocx*ocx + ocy*ocy + ocz*ocz - tca*tca;
+    if (d2 > radius*radius) continue;  // miss
+
+    const thc = Math.sqrt(radius*radius - d2);
+    const t0  = tca - thc;
+    if (t0 >= 0 && t0 < closest.t) {
+      closest = { player: p, t: t0 };
     }
   }
 
-  // If hit, increment shooter’s score
-  if (hit) {
+  // 4) If hit, increment score
+  let hitName = null;
+  if (closest.player) {
+    hitName = closest.player.name;
     await doc.send(new UpdateCommand({
       TableName: "LaserGamePlayers",
       Key: { name },
@@ -101,24 +115,25 @@ export async function handler(event) {
     }));
   }
 
-  // Broadcast to everyone via the GSI
+  // 5) Broadcast result to everyone
+  //    (reuse your GSI scan for connections)
   const { Items = [] } = await doc.send(new ScanCommand({
     TableName: "LaserGamePlayers",
     IndexName: "ConnectionId",
     ProjectionExpression: "connectionId, #nm",
-    ExpressionAttributeNames: { 
-      "#nm": "name" 
-    }
+    ExpressionAttributeNames: { "#nm": "name" }
   }));
-  
 
-  const payload = JSON.stringify({
+  const resultPayload = JSON.stringify({
     action: "shootResult",
-    name,
-    result: hit ? `Hit ${hit.name}` : "Miss",
-    score: hit ? "Point awarded!" : "Better luck next time!"
+    shooter: name,
+    hit:    hitName ? { name: hitName } : null,
+    message: hitName
+      ? `Hit ${hitName}!`
+      : "Miss!"
   });
-  await broadcastToAll(doc, apigw, Items, payload);
-  
-  return { statusCode: 200, body: "OK" };
+
+  await broadcastToAll(apigw, Items, resultPayload);
+
+  return { statusCode: 200 };
 }

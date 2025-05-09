@@ -1,3 +1,4 @@
+// movePlayer.mjs
 import { DynamoDBClient }  from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
@@ -11,55 +12,59 @@ import {
 } from "@aws-sdk/client-apigatewaymanagementapi";
 
 const ddb = new DynamoDBClient({});
-const doc = DynamoDBDocumentClient.from(ddb);
+const docClient = DynamoDBDocumentClient.from(ddb);
 
-async function broadcastToAll(doc, apigw, Items, payload) {
-  await Promise.all(Items.map(async item => {
-    const conn = item.connectionId;
+/**
+ * Broadcasts payload to all given connections,
+ * cleaning up any goneException stale entries.
+ *
+ * @param {import("@aws-sdk/lib-dynamodb").DynamoDBDocumentClient} docClient
+ * @param {import("@aws-sdk/client-apigatewaymanagementapi").ApiGatewayManagementApiClient} apigw
+ * @param {{ connectionId: string, name: string }[]} connections
+ * @param {string} payload
+ */
+async function broadcastToAll(docClient, apigw, connections, payload) {
+  console.log(`📣 broadcasting to ${connections.length} connections:`,
+    connections.map(c => c.connectionId));
+  await Promise.all(connections.map(async connItem => {
+    const conn = connItem.connectionId;
     try {
       await apigw.send(new PostToConnectionCommand({
         ConnectionId: conn,
         Data: payload
       }));
+      console.log("    ✅ sent to", conn);
     } catch (err) {
-      // 410 = GoneException
+      console.warn("    ❌ error sending to", conn, err.name);
       if (err.name === "GoneException" || err.$metadata?.httpStatusCode === 410) {
-        console.log(`Cleaning up stale connection ${conn} for player ${item.name}`);
-        // remove the stale connectionId from the player's record
-        await doc.send(new UpdateCommand({
+        console.log(`Cleaning up stale connection ${conn} for player ${connItem.name}`);
+        await docClient.send(new UpdateCommand({
           TableName: "LaserGamePlayers",
-          Key: { name: item.name },
+          Key: { name: connItem.name },
           UpdateExpression: "REMOVE connectionId"
         }));
-      } else {
-        console.error("Failed to broadcast to", conn, err);
       }
     }
   }));
 }
 
-
 export async function handler(event) {
-  // WebSocket management client
   const { domainName, stage, connectionId } = event.requestContext;
   const apigw = new ApiGatewayManagementApiClient({
     endpoint: `https://${domainName}/${stage}`
   });
 
-  // Pull name AND direction from the payload
+  // 1) Parse incoming
   const { name, direction } = JSON.parse(event.body);
 
-  // Load that player by name
-  const { Item = {} } = await doc.send(new GetCommand({
+  // 2) Load & update that player
+  const { Item = {} } = await docClient.send(new GetCommand({
     TableName: "LaserGamePlayers",
     Key: { name }
   }));
 
-  // Destructure position & score
   let { x = 0, y = 0, score = 0 } = Item;
-
-  // Apply movement logic
-  const gridSize = 10;
+  const gridSize = 15;
   switch (direction) {
     case "up":    y = Math.max(0, y - 1); break;
     case "down":  y = Math.min(gridSize - 1, y + 1); break;
@@ -67,16 +72,14 @@ export async function handler(event) {
     case "right": x = Math.min(gridSize - 1, x + 1); break;
   }
 
-  // Write back exactly as before
-  const now = Date.now();
-  await doc.send(new UpdateCommand({
+  await docClient.send(new UpdateCommand({
     TableName: "LaserGamePlayers",
     Key: { name },
     UpdateExpression: [
-      "SET #x        = :x",
-      "  , #y        = :y",
-      "  , #score    = :score",
-      "  , #online   = :online",
+      "SET #x = :x",
+      "  , #y = :y",
+      "  , #score = :score",
+      "  , #online = :online",
       "  , #lastActive = :now"
     ].join(" "),
     ExpressionAttributeNames: {
@@ -91,27 +94,20 @@ export async function handler(event) {
       ":y": y,
       ":score": score,
       ":online": true,
-      ":now": now
+      ":now": Date.now()
     }
   }));
-  
-  
 
-  const { Items = [] } = await doc.send(new ScanCommand({
+  // 3) Scan entire table for everyone with a connectionId
+  const { Items = [] } = await docClient.send(new ScanCommand({
     TableName: "LaserGamePlayers",
-    IndexName: "connectionId",
     ProjectionExpression: "connectionId, #nm",
-    ExpressionAttributeNames: { 
-      "#nm": "name" 
-    }
+    ExpressionAttributeNames: { "#nm": "name" }
   }));
-  
 
-  const payload = JSON.stringify({
-    action: "playerMoved",
-    name, x, y
-  });
-    +  await broadcastToAll(doc, apigw, Items, payload);
-  // Return stub
+  // 4) Broadcast it
+  const payload = JSON.stringify({ action: "playerMoved", name, x, y });
+  await broadcastToAll(docClient, apigw, Items, payload);
+
   return { statusCode: 200, body: "OK" };
 }

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Laser Cubes Multiplayer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="loginOverlay">
+    <div id="loginBox">
+      <h2>Welcome to Laser Cubes</h2>
+      <input type="text" id="playerNameInput" placeholder="Player name">
+      <button id="loginButton">Join Game</button>
+    </div>
+  </div>
+
+  <div id="pauseOverlay">
+    <div id="pauseBox">
+      <button id="resumeButton">Resume</button>
+      <button id="logoutButton">Logout</button>
+    </div>
+  </div>  
+
+  <!-- The 3D canvas will be injected by game.js -->
+  <script type="module" src="../src/app.js"></script>
+</body>
+</html>
