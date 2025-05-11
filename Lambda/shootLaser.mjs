@@ -119,7 +119,7 @@ export async function handler(event) {
   //    (reuse your GSI scan for connections)
   const { Items = [] } = await doc.send(new ScanCommand({
     TableName: "LaserGamePlayers",
-    IndexName: "ConnectionId",
+    IndexName: "connectionId",
     ProjectionExpression: "connectionId, #nm",
     ExpressionAttributeNames: { "#nm": "name" }
   }));
