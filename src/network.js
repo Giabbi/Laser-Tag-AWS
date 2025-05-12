@@ -1,15 +1,16 @@
+// src/network.js
 export default class Network {
     /**
-     * @param {string} name      Player name
-     * @param {function} onMessage  Callback for server messages
+     * @param {string}    name       Player name
+     * @param {function}  onMessage  Callback for inbound WS messages
      */
     constructor(name, onMessage) {
       this.name      = name;
       this.onMessage = onMessage;
-      this.ws         = null;
   
-      // Your API Gateway WebSocket endpoint
+      // Your API‑GW WebSocket endpoint
       this.wsUrl = "wss://besdqwvktd.execute-api.us-east-2.amazonaws.com/production";
+      this.ws    = null;
   
       this.connect();
     }
@@ -17,60 +18,40 @@ export default class Network {
     connect() {
       this.ws = new WebSocket(`${this.wsUrl}?name=${encodeURIComponent(this.name)}`);
   
-      this.ws.onopen = () => {
-        // No initial poll needed—state is pushed by your registerPlayer lambda
+      this.ws.onopen    = () => {
         console.log("WebSocket connected");
-        this.send({ action: "getGameState" });      
+        // Ask the server for the current snapshot
+        this.send({ action: "getGameState" });
       };
-  
-      this.ws.onmessage = ({ data }) => {
-        const msg = JSON.parse(data);
-        this.onMessage(msg);
-      };
-  
-      this.ws.onclose = () => {
-        alert("Disconnected from server");
-        window.location.reload();
-      };
-  
-      this.ws.onerror = err => {
-        console.error("WebSocket error:", err);
-      };
+      this.ws.onmessage = ({ data }) => this.onMessage(JSON.parse(data));
+      this.ws.onclose   = () => { alert("Disconnected"); window.location.reload(); };
+      this.ws.onerror   = err  => console.error("WebSocket error:", err);
     }
   
-    /**
-     * Low‐level send helper
-     * @param {object} payload
-     */
+    /* ------------------------------------------------- *
+     *  Low‑level helper
+     * ------------------------------------------------- */
     send(payload) {
       if (this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify(payload));
       }
     }
   
-    /**
-     * Tell the server to move the player one tile
-     * @param {"up"|"down"|"left"|"right"} direction
-     */
-    move(direction) {
+    /* ------------------------------------------------- *
+     *  Movement – now sends absolute grid coords
+     * ------------------------------------------------- */
+    updatePosition(x, y) {
       this.send({
-        action:    "movePlayer",
-        name:      this.name,
-        direction
+        action : "movePlayer",
+        name   : this.name,
+        x,      // integer grid column (0 … gridSize‑1)
+        y       // integer grid row    (0 … gridSize‑1)
       });
     }
   
-    /**
-     * Fire a 3D ray from origin along direction
-     * @param {{x:number,y:number,z:number}} origin
-     * @param {{x:number,y:number,z:number}} direction
-     */
+    /* (Keep shoot() exactly as before) */
     shoot(origin, direction) {
-      this.send({
-        action:    "shoot",
-        name:      this.name,
-        origin,    // must be provided for server‐side raycast
-        direction  // normalized world‐space vector
-      });
+      this.send({ action: "shoot", name: this.name, origin, direction });
     }
   }
+  
