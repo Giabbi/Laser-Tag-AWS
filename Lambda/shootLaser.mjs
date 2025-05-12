@@ -99,7 +99,8 @@ export async function handler(event) {
 
     // grid -> world transform
     const cx = (p.x - GRID_SIZE / 2 + 0.5) * SPACING;
-    const cy = PLAYER_RAD; // centre‑height of cube (0.5)
+    const baseY = typeof p.baseY === "number" ? p.baseY : 0;
+    const cy = baseY + PLAYER_RAD;                // <<–– now takes ramp height into account
     const cz = (p.y - GRID_SIZE / 2 + 0.5) * SPACING;
 
     // vector from origin to centre

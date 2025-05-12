@@ -7,17 +7,17 @@ export default class Network {
     constructor(name, onMessage) {
       this.name      = name;
       this.onMessage = onMessage;
-  
+
       // Your API‑GW WebSocket endpoint
       this.wsUrl = "wss://besdqwvktd.execute-api.us-east-2.amazonaws.com/production";
       this.ws    = null;
-  
+
       this.connect();
     }
-  
+
     connect() {
       this.ws = new WebSocket(`${this.wsUrl}?name=${encodeURIComponent(this.name)}`);
-  
+
       this.ws.onopen    = () => {
         console.log("WebSocket connected");
         // Ask the server for the current snapshot
@@ -27,7 +27,7 @@ export default class Network {
       this.ws.onclose   = () => { alert("Disconnected"); window.location.reload(); };
       this.ws.onerror   = err  => console.error("WebSocket error:", err);
     }
-  
+
     /* ------------------------------------------------- *
      *  Low‑level helper
      * ------------------------------------------------- */
@@ -36,22 +36,22 @@ export default class Network {
         this.ws.send(JSON.stringify(payload));
       }
     }
-  
+
     /* ------------------------------------------------- *
-     *  Movement – now sends absolute grid coords
+     *  Movement – now sends absolute grid coords **and baseY**
      * ------------------------------------------------- */
-    updatePosition(x, y) {
+    updatePosition(x, y, baseY) {
       this.send({
         action : "movePlayer",
         name   : this.name,
-        x,      // integer grid column (0 … gridSize‑1)
-        y       // integer grid row    (0 … gridSize‑1)
+        x,                 // integer grid column (0 … gridSize‑1)
+        y,                 // integer grid row    (0 … gridSize‑1)
+        baseY              // player’s current ground height (0 on flat floor)
       });
     }
-  
-    /* (Keep shoot() exactly as before) */
+
+    /* (shoot() unchanged) */
     shoot(origin, direction) {
       this.send({ action: "shoot", name: this.name, origin, direction });
     }
-  }
-  
+}

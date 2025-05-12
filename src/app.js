@@ -14,14 +14,14 @@ async function main() {
   let game    = null;
 
   /* ----------------------------------------------- *
-   *  NEW: helpers to suppress duplicate position pushes
+   *  helpers to suppress duplicate position pushes
    * ----------------------------------------------- */
   let lastGridX = null;
   let lastGridY = null;
   const MOVEMENT_SEND_INTERVAL = 100;   // ms
 
   /* ----------------------------------------------- *
-   *  Send current grid position to the server
+   *  Send current grid position (+ baseY) to the server
    * ----------------------------------------------- */
   function sendMovement() {
     if (!network || !game) return;
@@ -31,8 +31,11 @@ async function main() {
     const gridX = Math.round(wx / game.spacing + game.gridSize / 2 - 0.5);
     const gridY = Math.round(wz / game.spacing + game.gridSize / 2 - 0.5);
 
+    // Current ground height beneath the player
+    const baseY = game._calculateBaseY(wx, wz);
+
     if (gridX !== lastGridX || gridY !== lastGridY) {
-      network.updatePosition(gridX, gridY);
+      network.updatePosition(gridX, gridY, baseY);
       lastGridX = gridX;
       lastGridY = gridY;
     }
@@ -48,7 +51,7 @@ async function main() {
     loginOverlay.style.display = 'none';
 
     network = new Network(name, handleServerMessage);
-    game    = new Game(document.body, network);    // passes “network” into Game
+    game    = new Game(document.body, network);
 
     // Push position 10×/sec
     setInterval(sendMovement, MOVEMENT_SEND_INTERVAL);
@@ -64,20 +67,26 @@ async function main() {
   function handleServerMessage(msg) {
     if (!game) return;
     switch (msg.action) {
-      case 'gameState':    game.setState(msg.players);      break;
-      case 'playerMoved':  game.onPlayerMoved(msg.name, msg.x, msg.y, network.name); break;
+      case 'gameState':
+        game.setState(msg.players);
+        break;
+      case 'playerMoved':
+        game.onPlayerMoved(msg.name, msg.x, msg.y, network.name, msg.baseY);
+        break;
       case 'shootResult':
         console.log(msg.message || msg.error || msg);
         game.handleShootEffect(msg.shooter, msg.hit, msg.origin, msg.direction);
         break;
-      case 'playerJoined': game._spawnPlayer(msg.player.name, msg.player.x, msg.player.y); break;
-      case 'playerLeft':   game._removePlayer(msg.name); break;
+      case 'playerJoined':
+        game._spawnPlayer(msg.player.name, msg.player.x, msg.player.y, msg.player.baseY);
+        break;
+      case 'playerLeft':
+        game._removePlayer(msg.name);
+        break;
     }
   }
 
-  /* ----------------------------------------------- *
-   *  Pause / resume / logout UI (unchanged)
-   * ----------------------------------------------- */
+  /* pause / resume / logout UI unchanged */
   document.addEventListener('pointerlockchange', () => {
     if (!game) return;
     if (document.pointerLockElement !== game.renderer.domElement) {
