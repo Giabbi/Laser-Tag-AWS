@@ -9,7 +9,7 @@ export default class Game {
     this.gridSize     = 135;
     this.spacing      = 0.2;
     this.cubeSize     = 1;
-    this.eyeHeight    = this.cubeSize - 0.2; // Player's eye height from their base
+    this.eyeHeight    = this.cubeSize - 0.2;
     this.halfSize     = (this.gridSize * this.spacing) / 2;
     this.moveSpeed    = 5;
     this.lookSens     = 0.002;
@@ -21,7 +21,7 @@ export default class Game {
 
     this.serverPosition = new THREE.Vector3();
     this.isServerPositionAuthoritative = false;
-    this.interpolationAlpha = 0.2; // Smoother: 0.1-0.2, Snappier: 0.3-0.5
+    this.interpolationAlpha = 0.2;
 
     this.scene    = new THREE.Scene();
     this.camera   = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
@@ -34,19 +34,17 @@ export default class Game {
       this.renderer.domElement.requestPointerLock()
     );
 
-    this._setupHeadAndCamera(); // Combined setup for clarity
-    this._setupControls();      // Event listeners for input
+    this._setupHeadAndCamera();
+    this._setupControls();
     this._setupLights();
     this._setupFloorAndWalls();
-    this._setupRamps();         // Ensure this is called
-
+    this._setupRamps();          // ★ revamped
     this.clock = new THREE.Clock();
     this._animate();
 
     window.addEventListener('resize', this.onWindowResize.bind(this), false);
   }
 
-  
   onWindowResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
@@ -54,47 +52,43 @@ export default class Game {
   }
 
   _setupHeadAndCamera() {
-    // 'head' is the main player object that moves and yaws (turns left/right)
     this.head = new THREE.Object3D();
-    this.head.position.set(0, this.eyeHeight, 0); // Initial position on the ground
+    this.head.position.set(0, this.eyeHeight, 0);
     this.serverPosition.copy(this.head.position);
 
-    // Camera is a child of the head. It handles pitch (looking up/down).
-    this.camera.position.set(0, 0, 0); // Camera is at the head's origin
+    this.camera.position.set(0, 0, 0);
     this.head.add(this.camera);
     this.scene.add(this.head);
   }
 
   _setupControls() {
-    this.yaw = 0;   // Left-right rotation of the head
-    this.pitch = 0; // Up-down rotation of the camera
+    this.yaw = 0;
+    this.pitch = 0;
 
     document.addEventListener('mousemove', e => {
       if (document.pointerLockElement === this.renderer.domElement) {
         this.yaw   -= e.movementX * this.lookSens;
         this.pitch -= e.movementY * this.lookSens;
-        this.pitch  = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.pitch)); // Clamp pitch
-
-        this.head.rotation.y   = this.yaw;   // Apply yaw to the head
-        this.camera.rotation.x = this.pitch; // Apply pitch to the camera
+        this.pitch  = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.pitch));
+        this.head.rotation.y   = this.yaw;
+        this.camera.rotation.x = this.pitch;
       }
     });
 
     this.localMovementInput = { forward:false, backward:false, left:false, right:false };
     document.addEventListener('keydown', e => {
-        if (document.pointerLockElement !== this.renderer.domElement && e.code !== 'Escape') return;
-        // Map WASD to intuitive local movement directions
-        if (e.code === 'KeyW') this.localMovementInput.forward = true;
-        else if (e.code === 'KeyS') this.localMovementInput.backward = true;
-        else if (e.code === 'KeyA') this.localMovementInput.left = true;
-        else if (e.code === 'KeyD') this.localMovementInput.right = true;
-        else if (e.code === 'Space') this._tryShoot();
+      if (document.pointerLockElement !== this.renderer.domElement && e.code !== 'Escape') return;
+      if (e.code === 'KeyW') this.localMovementInput.forward = true;
+      else if (e.code === 'KeyS') this.localMovementInput.backward = true;
+      else if (e.code === 'KeyA') this.localMovementInput.left = true;
+      else if (e.code === 'KeyD') this.localMovementInput.right = true;
+      else if (e.code === 'Space') this._tryShoot();
     });
-     document.addEventListener('keyup', e => { // Corrected keyup
-        if (e.code === 'KeyW') this.localMovementInput.forward = false;
-        else if (e.code === 'KeyS') this.localMovementInput.backward = false;
-        else if (e.code === 'KeyA') this.localMovementInput.left = false;
-        else if (e.code === 'KeyD') this.localMovementInput.right = false; // Corrected this.localMovementInput.d to this.localMovementInput.right
+    document.addEventListener('keyup', e => {
+      if (e.code === 'KeyW') this.localMovementInput.forward = false;
+      else if (e.code === 'KeyS') this.localMovementInput.backward = false;
+      else if (e.code === 'KeyA') this.localMovementInput.left = false;
+      else if (e.code === 'KeyD') this.localMovementInput.right = false;
     });
   }
 
@@ -102,7 +96,7 @@ export default class Game {
     this.scene.add(new THREE.AmbientLight(0x606060));
     this.scene.add(new THREE.HemisphereLight(0x888877, 0x777788, 0.8));
     const headLight = new THREE.PointLight(0xffffff, 0.7, 50);
-    this.camera.add(headLight); // Light moves with the camera/head
+    this.camera.add(headLight);
   }
 
   _setupFloorAndWalls() {
@@ -120,7 +114,7 @@ export default class Game {
     this.scene.add(floor);
 
     const wallMat  = new THREE.MeshStandardMaterial({ color:0x333333, roughness:0.9 });
-    const wallHeight = 3; // Define wall height
+    const wallHeight = 3;
     const wx = new THREE.BoxGeometry(this.gridSize*this.spacing + 0.4, wallHeight, 0.2);
     const wz = new THREE.BoxGeometry(0.2, wallHeight, this.gridSize*this.spacing + 0.4);
     for (let dir of [-1,1]) {
@@ -133,98 +127,89 @@ export default class Game {
     }
   }
 
+  /* ------------------------------------------------------ *
+   *  Ramps – now distributed based on % of gridSize
+   * ------------------------------------------------------ */
   _setupRamps() {
-    this.obstacles = []; // Initialize obstacles array
-    const rampGeo = new THREE.ConeGeometry(2, 2, 4); // baseRadius, height, radialSegments
+    this.obstacles = [];
+    const rampGeo = new THREE.ConeGeometry(2, 2, 4);
     const rampMat = new THREE.MeshStandardMaterial({ color:0x555555, roughness:0.7, metalness:0.3 });
-    const positions = [ // gridX, gridY coordinates for ramp centers
-      [2,2],[4,8],[8,2],[12,12],[7,7],
-      [3,12],[10,4],[5,14],[14,5],[11,9]
-    ];
+
+    // Fractions along the grid (0‑1 range)
+    const frac = [0.2, 0.5, 0.8];
+    const positions = [];
+    frac.forEach(fx => frac.forEach(fz => positions.push([
+      Math.round(fx * (this.gridSize-1)),
+      Math.round(fz * (this.gridSize-1))
+    ])));
+
     for (let [gx,gy] of positions) {
       const ramp = new THREE.Mesh(rampGeo, rampMat);
-      // Convert grid coordinates to world coordinates
-      // Assuming (0,0) grid is center of world for simplicity, adjust if needed
       ramp.position.set(
-        (gx - this.gridSize/2 + 0.5) * this.spacing, // Center ramp in grid cell
-        1, // Base of the cone (height/2) touches ground
+        (gx - this.gridSize/2 + 0.5) * this.spacing,
+        1,
         (gy - this.gridSize/2 + 0.5) * this.spacing
       );
-      ramp.rotation.y = Math.random() * Math.PI * 2; // Random orientation
+      ramp.rotation.y = Math.random() * Math.PI * 2;
       this.scene.add(ramp);
-      this.obstacles.push({ // Store data needed for collision/climbing
+      this.obstacles.push({
         mesh: ramp,
-        type: 'cone', // You can add types if you have different obstacle shapes
-        halfBase: rampGeo.parameters.radius, // Cone radius
-        height: rampGeo.parameters.height,
-        // For cones, exact invRot might not be as useful as for square ramps
-        // You'd typically use distance to center and height calculation
+        type: 'cone',
+        halfBase: rampGeo.parameters.radius,
+        height: rampGeo.parameters.height
       });
     }
   }
 
+  /* Helper used for remote‑player Y as well */
+  _calculateBaseY(wx, wz) {
+    let base = 0;
+    for (const obs of this.obstacles) {
+      if (obs.type !== 'cone') continue;
+      const dx = wx - obs.mesh.position.x;
+      const dz = wz - obs.mesh.position.z;
+      const dist = Math.sqrt(dx*dx + dz*dz);
+      if (dist < obs.halfBase) {
+        const h = obs.height * (1 - dist / obs.halfBase);
+        if (h > base) base = h;
+      }
+    }
+    return base;
+  }
 
   _animate() {
     requestAnimationFrame(()=>this._animate());
     const dt = this.clock.getDelta();
-
     this._updateLocalPlayerMovement(dt);
     this._updateProjectiles(dt);
-
     this.renderer.render(this.scene, this.camera);
   }
 
   _updateLocalPlayerMovement(dt) {
-    const currentMoveSpeed = this.moveSpeed * dt;
+    const s = this.moveSpeed * dt;
+    if (this.localMovementInput.forward)  this.head.translateZ(-s);
+    if (this.localMovementInput.backward) this.head.translateZ( s);
+    if (this.localMovementInput.left)     this.head.translateX(-s);
+    if (this.localMovementInput.right)    this.head.translateX( s);
 
-    // LOCAL PREDICTION: Movement is relative to the 'head' object's orientation.
-    // This is now the *sole* driver for this.head.position.
-    if (this.localMovementInput.forward) this.head.translateZ(-currentMoveSpeed);
-    if (this.localMovementInput.backward) this.head.translateZ(currentMoveSpeed);
-    if (this.localMovementInput.left) this.head.translateX(-currentMoveSpeed);
-    if (this.localMovementInput.right) this.head.translateX(currentMoveSpeed);
-
-    // Wall clamping - based on local predicted position
     const margin = this.cubeSize / 2;
     this.head.position.x = Math.max(-this.halfSize + margin, Math.min(this.halfSize - margin, this.head.position.x));
     this.head.position.z = Math.max(-this.halfSize + margin, Math.min(this.halfSize - margin, this.head.position.z));
 
-    // Ramp/Obstacle climbing logic - based on local predicted position
-    let calculatedBaseY = 0;
-    for (let obs of this.obstacles) {
-        if (obs.type === 'cone') {
-            const dx = this.head.position.x - obs.mesh.position.x;
-            const dz = this.head.position.z - obs.mesh.position.z;
-            const distanceToConeCenter = Math.sqrt(dx*dx + dz*dz);
-
-            if (distanceToConeCenter < obs.halfBase) {
-                const heightOnCone = obs.height * (1 - (distanceToConeCenter / obs.halfBase));
-                if (heightOnCone > calculatedBaseY) {
-                    calculatedBaseY = heightOnCone;
-                }
-            }
-        }
-    }
-    const targetYPosition = calculatedBaseY + this.eyeHeight;
-    // Smoothly adjust local Y position.
-    this.head.position.y += (targetYPosition - this.head.position.y) * 0.2; // Increased alpha for Y responsiveness
-
-    // SERVER POSITION RECONCILIATION (LERPING) IS NOW REMOVED FOR THE LOCAL PLAYER
-    // The 'this.serverPosition' is updated by onPlayerMoved for our own player,
-    // but it's NOT used here to visually correct 'this.head.position'.
-    // 'this.isServerPositionAuthoritative' is effectively ignored for self-movement visuals.
+    const targetY = this._calculateBaseY(this.head.position.x, this.head.position.z) + this.eyeHeight;
+    this.head.position.y += (targetY - this.head.position.y) * 0.2;
   }
 
-  _updateProjectiles(dt) { // Mostly as before
+  _updateProjectiles(dt) {
     for (let i = this.projectiles.length-1; i>=0; i--) {
       const p = this.projectiles[i];
       p.mesh.position.addScaledVector(p.velocity, dt);
       p.life -= dt;
-      let dead = p.life <= 0;
-      if (!dead && (Math.abs(p.mesh.position.x) > this.halfSize + 5 || Math.abs(p.mesh.position.z) > this.halfSize + 5 || p.mesh.position.y < -1 || p.mesh.position.y > 10)) {
-          dead = true;
-      }
-      if (dead) {
+      const offWorld =
+        Math.abs(p.mesh.position.x) > this.halfSize + 5 ||
+        Math.abs(p.mesh.position.z) > this.halfSize + 5 ||
+        p.mesh.position.y < -1 || p.mesh.position.y > 10;
+      if (p.life <= 0 || offWorld) {
         this.scene.remove(p.mesh);
         p.mesh.geometry.dispose();
         p.mesh.material.dispose();
@@ -233,94 +218,73 @@ export default class Game {
     }
   }
 
+  /* -------------------------- *
+   *  Server snapshot handling
+   * -------------------------- */
   setState(players) {
-    console.log("GAME: setState called with players:", JSON.parse(JSON.stringify(players))); // Deep copy for logging
-    for (const name in this.players) this._removePlayer(name);
+    for (const n in this.players) this._removePlayer(n);
     this.players = {};
     players.forEach(p => {
       if (p.name === this.network.name) {
-        const worldX = (p.x - this.gridSize/2 + 0.5) * this.spacing;
-        const worldZ = (p.y - this.gridSize/2 + 0.5) * this.spacing;
-        // Server also sends Y, which might be just the base grid Y or calculated
-        const worldY = p.baseY !== undefined ? p.baseY + this.eyeHeight : this.eyeHeight; // Assume server sends grid Y
-        this.head.position.set(worldX, worldY, worldZ);
-        this.serverPosition.set(worldX, worldY, worldZ);
-        this.isServerPositionAuthoritative = true;
+        const wx = (p.x - this.gridSize/2 + 0.5) * this.spacing;
+        const wz = (p.y - this.gridSize/2 + 0.5) * this.spacing;
+        const wy = (p.baseY ?? this._calculateBaseY(wx,wz)) + this.eyeHeight;
+        this.head.position.set(wx, wy, wz);
+        this.serverPosition.set(wx, wy, wz);
       } else {
-        console.log(`GAME: setState spawning other player: <span class="math-inline">\{p\.name\} at grid \(x\:</span>{p.x}, y:${p.y}), baseY: ${p.baseY}`);
-        this._spawnPlayer(p.name, p.x, p.y, p.baseY); // Pass baseY if available
+        this._spawnPlayer(p.name, p.x, p.y, p.baseY);
       }
     });
   }
 
-  onPlayerMoved(name, x, y, localPlayerName, baseYFromServer) {
-    // Default incoming grid coordinates if undefined for other players
-    // For localPlayerName, we assume x and y will always be valid from server logic.
-    const currentGridX = (name !== localPlayerName && (x === undefined || x === null)) ? 
-                         (this.players[name]?.userData?.gridX || 0) : // Use stored or 0 if missing
-                         x;
-    const currentGridY = (name !== localPlayerName && (y === undefined || y === null)) ?
-                         (this.players[name]?.userData?.gridY || 0) : // Use stored or 0 if missing
-                         y;
-  
-    const worldX = (currentGridX - this.gridSize / 2 + 0.5) * this.spacing;
-    const worldZ = (currentGridY - this.gridSize / 2 + 0.5) * this.spacing;
-  
-    const serverCalculatedHeadY = baseYFromServer !== undefined ? baseYFromServer + this.eyeHeight : this.eyeHeight;
-  
-    if (name === localPlayerName) {
-      this.serverPosition.set(worldX, serverCalculatedHeadY, worldZ);
+  onPlayerMoved(name, x, y, localName, baseYFromServer) {
+    const gridX = (name !== localName && (x==null)) ? this.players[name]?.userData.gridX ?? 0 : x;
+    const gridY = (name !== localName && (y==null)) ? this.players[name]?.userData.gridY ?? 0 : y;
+
+    const wx = (gridX - this.gridSize/2 + 0.5) * this.spacing;
+    const wz = (gridY - this.gridSize/2 + 0.5) * this.spacing;
+    const baseY = baseYFromServer ?? this._calculateBaseY(wx, wz);
+
+    if (name === localName) {
+      this.serverPosition.set(wx, baseY + this.eyeHeight, wz);
     } else {
       if (!this.players[name]) {
-        console.log(`GAME: Spawning new other player <span class="math-inline">\{name\} via onPlayerMoved with grid \(x\:</span>{currentGridX}, y:${currentGridY})`);
-        this._spawnPlayer(name, currentGridX, currentGridY, baseYFromServer);
+        this._spawnPlayer(name, gridX, gridY, baseY);
       } else {
-        const otherPlayerMeshY = baseYFromServer !== undefined ? baseYFromServer + this.cubeSize / 2 : this.cubeSize / 2;
-        console.log(`GAME: Updating existing other player <span class="math-inline">\{name\} to world \(x\:</span>{worldX.toFixed(2)}, y:<span class="math-inline">\{otherPlayerMeshY\.toFixed\(2\)\}, z\:</span>{worldZ.toFixed(2)}) [from grid x:<span class="math-inline">\{currentGridX\}, y\:</span>{currentGridY}]`);
-        this.players[name].position.set(worldX, otherPlayerMeshY, worldZ);
-        // Update stored grid coordinates
-        this.players[name].userData.gridX = currentGridX;
-        this.players[name].userData.gridY = currentGridY;
+        const mesh = this.players[name];
+        mesh.position.set(wx, baseY + this.cubeSize/2, wz);
+        mesh.userData.gridX = gridX;
+        mesh.userData.gridY = gridY;
       }
     }
   }
 
-  _spawnPlayer(name, gridX, gridY, baseY) {
-    // Provide default grid coordinates if undefined
-    const currentGridX = (gridX === undefined || gridX === null) ? 0 : gridX;
-    const currentGridY = (gridY === undefined || gridY === null) ? 0 : gridY;
-  
-    const worldX = (currentGridX - this.gridSize/2 + 0.5) * this.spacing;
-    const worldZ = (currentGridY - this.gridSize/2 + 0.5) * this.spacing;
-    const playerYPos = baseY !== undefined ? baseY + this.cubeSize/2 : this.cubeSize/2;
-  
-    console.log(`GAME: _spawnPlayer for <span class="math-inline">\{name\} using grid \(x\:</span>{currentGridX}, y:<span class="math-inline">\{currentGridY\}\) \-\> world \(x\:</span>{worldX.toFixed(2)}, y:<span class="math-inline">\{playerYPos\.toFixed\(2\)\}, z\:</span>{worldZ.toFixed(2)})`);
-  
-  
+  _spawnPlayer(name, gridX=0, gridY=0, baseY) {
+    const wx = (gridX - this.gridSize/2 + 0.5) * this.spacing;
+    const wz = (gridY - this.gridSize/2 + 0.5) * this.spacing;
+    const by = baseY ?? this._calculateBaseY(wx, wz);
+
     if (name === this.network.name && this.head) return;
     if (this.players[name]) {
-      console.warn(`GAME: _spawnPlayer called for already existing player: ${name}. Updating position instead.`);
-      this.players[name].position.set(worldX, playerYPos, worldZ); // Update position if somehow called again
+      this.players[name].position.set(wx, by + this.cubeSize/2, wz);
       return;
     }
-  
+
     const geom = new THREE.BoxGeometry(this.cubeSize, this.cubeSize, this.cubeSize);
-    const mat  = new THREE.MeshLambertMaterial({ color: Math.random() * 0xffffff });
+    const mat  = new THREE.MeshLambertMaterial({ color: Math.random()*0xffffff });
     const mesh = new THREE.Mesh(geom, mat);
-    mesh.position.set(worldX, playerYPos, worldZ);
-  
-    // Store grid coordinates on the mesh's userData for potential future reference
-    mesh.userData.gridX = currentGridX;
-    mesh.userData.gridY = currentGridY;
-  
+    mesh.position.set(wx, by + this.cubeSize/2, wz);
+    mesh.userData.gridX = gridX;
+    mesh.userData.gridY = gridY;
     this.scene.add(mesh);
     this.players[name] = mesh;
   }
-  _removePlayer(name) { // As before
+
+  _removePlayer(name) {
     if (this.players[name]) {
       this.scene.remove(this.players[name]);
-      if (this.players[name].geometry) this.players[name].geometry.dispose();
-      if (this.players[name].material) this.players[name].material.dispose();
+      this.players[name].geometry.dispose();
+      this.players[name].material.dispose();
       delete this.players[name];
     }
   }
