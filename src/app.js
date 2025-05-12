@@ -68,7 +68,7 @@ async function main() {
       case 'playerMoved':  game.onPlayerMoved(msg.name, msg.x, msg.y, network.name); break;
       case 'shootResult':
         console.log(msg.message || msg.error || msg);
-        if (msg.shooter) game.handleShootEffect(msg.shooter, msg.hit);
+        game.handleShootEffect(msg.shooter, msg.hit, msg.origin, msg.direction);
         break;
       case 'playerJoined': game._spawnPlayer(msg.player.name, msg.player.x, msg.player.y); break;
       case 'playerLeft':   game._removePlayer(msg.name); break;

@@ -364,9 +364,22 @@ export default class Game {
       // _origin and _direction from server can be used to draw the actual laser path
       console.log("Shoot effect from server:", shooterName, "hit:", hitInfo);
 
-      // Example: Create a very short-lived line for the laser
-      // This requires origin and direction from the server if you want to draw actual path
-      // For now, just a console log. You'd add visual effects here.
+
+      if (shooterName !== this.network.name && origin && direction) {
+        const bulletGeo = new THREE.SphereGeometry(this.bulletRadius, 6, 6);
+        const bulletMat = new THREE.MeshBasicMaterial({ color: 0xff8800 });
+        const bulletMesh = new THREE.Mesh(bulletGeo, bulletMat);
+        bulletMesh.position.set(origin.x, origin.y, origin.z);
+        this.scene.add(bulletMesh);
+        this.projectiles.push({
+          mesh: bulletMesh,
+          velocity: new THREE.Vector3(direction.x, direction.y, direction.z)
+                      .multiplyScalar(this.bulletSpeed),
+          life: this.bulletLife,
+          shooterName
+        });
+      }
+      
       if (hitInfo) {
           console.log(`${shooterName} hit ${hitInfo.name}!`);
           // Maybe make the hit player flash red or something
