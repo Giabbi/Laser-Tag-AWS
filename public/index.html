@@ -3,7 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <title>Laser Cubes Multiplayer</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="public/style.css">
+  <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/site.webmanifest" />
 </head>
 <body>
   <div id="loginOverlay">
@@ -19,9 +24,11 @@
       <button id="resumeButton">Resume</button>
       <button id="logoutButton">Logout</button>
     </div>
-  </div>  
-
-  <!-- The 3D canvas will be injected by game.js -->
-  <script type="module" src="../src/app.js"></script>
+  </div>
+  <div id="leaderboard">
+    <h3>Top&nbsp;5</h3>
+    <ol></ol>
+  </div>
+  <script type="module" src="src/app.js"></script>
 </body>
 </html>

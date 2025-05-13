@@ -1,30 +1,30 @@
-// shootLaser.mjs – fixed world‑space hit‑detection + broadcast origin/dir
+// shootLaser.mjs
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
   GetCommand,
   ScanCommand,
-  UpdateCommand
+  UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import {
   ApiGatewayManagementApiClient,
-  PostToConnectionCommand
+  PostToConnectionCommand,
 } from "@aws-sdk/client-apigatewaymanagementapi";
 
 /* -------------------------------------------------- *
- * Constants – keep in sync with Game.js
+ *  Constants – keep in sync with Game.js
  * -------------------------------------------------- */
-const GRID_SIZE  = 135;   // <- same as Game.gridSize
-const SPACING    = 0.2;   // <- same as Game.spacing (world‑units / grid‑cell)
-const PLAYER_RAD = 0.5;   // player half‑width in world units (cubeSize = 1)
+const GRID_SIZE  = 135;
+const SPACING    = 0.2;
+const PLAYER_RAD = 0.5;
 
 const ddb = new DynamoDBClient({});
 const doc = DynamoDBDocumentClient.from(ddb);
 
-// helper to broadcast to all live connections
-async function broadcastToAll(apigw, items, payload) {
+/* helper – broadcast payload to all live sockets */
+async function broadcast(apigw, liveItems, payload) {
   await Promise.all(
-    items.map(async (item) => {
+    liveItems.map(async item => {
       if (!item.connectionId) return;
       try {
         await apigw.send(
@@ -34,8 +34,11 @@ async function broadcastToAll(apigw, items, payload) {
           })
         );
       } catch (err) {
-        if (err.name === "GoneException" || err.$metadata?.httpStatusCode === 410) {
-          // tidy stale connection
+        if (
+          err.name === "GoneException" ||
+          err.$metadata?.httpStatusCode === 410
+        ) {
+          /* mark them offline */
           await doc.send(
             new UpdateCommand({
               TableName: "LaserGamePlayers",
@@ -51,96 +54,105 @@ async function broadcastToAll(apigw, items, payload) {
   );
 }
 
+/* ============================================================ */
 export async function handler(event) {
   const { domainName, stage, connectionId } = event.requestContext;
   const apigw = new ApiGatewayManagementApiClient({
     endpoint: `https://${domainName}/${stage}`,
   });
 
-  /* 1) Parse payload */
-  let parsed;
+  /* ---------- 1) parse payload ---------- */
+  let data = {};
   try {
-    parsed = JSON.parse(event.body || "{}");
-  } catch (_) {
-    parsed = {};
-  }
-  const { name, origin, direction } = parsed;
+    data = JSON.parse(event.body || "{}");
+  } catch (_) {}
+  const { name, origin, direction } = data;
   if (!name || !origin || !direction) {
     await apigw.send(
       new PostToConnectionCommand({
         ConnectionId: connectionId,
-        Data: JSON.stringify({ action: "shootResult", error: "Invalid shoot payload" }),
+        Data: JSON.stringify({
+          action: "shootResult",
+          error: "Invalid shoot payload",
+        }),
       })
     );
     return { statusCode: 400 };
   }
 
-  /* 2) Shooter exists? */
-  const shooter = await doc.send(new GetCommand({ TableName: "LaserGamePlayers", Key: { name } }));
+  /* ---------- 2) ensure shooter exists ---------- */
+  const shooter = await doc.send(
+    new GetCommand({
+      TableName: "LaserGamePlayers",
+      Key: { name },
+    })
+  );
   if (!shooter.Item) {
     await apigw.send(
       new PostToConnectionCommand({
         ConnectionId: connectionId,
-        Data: JSON.stringify({ action: "shootResult", error: "Player not found" }),
+        Data: JSON.stringify({
+          action: "shootResult",
+          error: "Player not found",
+        }),
       })
     );
     return { statusCode: 200 };
   }
 
-  /* 3) Convert all player positions to *world* coords and test ray‑sphere */
+  /* ---------- 3) raycast vs every other player ---------- */
   const scan = await doc.send(new ScanCommand({ TableName: "LaserGamePlayers" }));
 
-  const dir    = direction; // assumed already normalised by client
-  let closestT = Infinity;
+  const dir = direction; // already normalized by client
+  let closestT  = Infinity;
   let hitPlayer = null;
 
   for (const p of scan.Items || []) {
-    if (p.name === name) continue; // don't hit yourself
+    if (p.name === name) continue;   // don't hit yourself
 
-    // grid -> world transform
+    /* grid → world */
     const cx = (p.x - GRID_SIZE / 2 + 0.5) * SPACING;
     const baseY = typeof p.baseY === "number" ? p.baseY : 0;
-    const cy = baseY + PLAYER_RAD;                // <<–– now takes ramp height into account
+    const cy = baseY + PLAYER_RAD;
     const cz = (p.y - GRID_SIZE / 2 + 0.5) * SPACING;
 
-    // vector from origin to centre
+    /* origin→centre vector */
     const ocx = cx - origin.x;
     const ocy = cy - origin.y;
     const ocz = cz - origin.z;
 
-    // projection length of oc onto dir
     const tca = ocx * dir.x + ocy * dir.y + ocz * dir.z;
     if (tca < 0) continue; // behind shooter
 
-    // squared distance from sphere centre to ray
-    const d2 = ocx * ocx + ocy * ocy + ocz * ocz - tca * tca;
-    if (d2 > PLAYER_RAD * PLAYER_RAD) continue; // miss
+    const d2 =
+      ocx * ocx + ocy * ocy + ocz * ocz - tca * tca;
+    if (d2 > PLAYER_RAD * PLAYER_RAD) continue;
 
-    // distance from tca to intersection
-    const thc   = Math.sqrt(PLAYER_RAD * PLAYER_RAD - d2);
-    const tHit  = tca - thc;
+    const thc  = Math.sqrt(PLAYER_RAD * PLAYER_RAD - d2);
+    const tHit = tca - thc;
     if (tHit >= 0 && tHit < closestT) {
       closestT  = tHit;
       hitPlayer = p;
     }
   }
 
-  /* 4) Award point */
-  let hitName = null;
+  /* ---------- 4) update score if hit ---------- */
+  let shooterScore = shooter.Item.score ?? 0;
   if (hitPlayer) {
-    hitName = hitPlayer.name;
-    await doc.send(
+    const res = await doc.send(
       new UpdateCommand({
         TableName: "LaserGamePlayers",
         Key: { name },
         UpdateExpression: "SET score = score + :inc",
         ExpressionAttributeValues: { ":inc": 1 },
+        ReturnValues: "UPDATED_NEW",
       })
     );
+    shooterScore = res.Attributes?.score ?? shooterScore;
   }
 
-  /* 5) Gather live connections */
-  const { Items = [] } = await doc.send(
+  /* ---------- 5) gather live connections ---------- */
+  const live = await doc.send(
     new ScanCommand({
       TableName: "LaserGamePlayers",
       ProjectionExpression: "connectionId, #nm",
@@ -149,16 +161,17 @@ export async function handler(event) {
     })
   );
 
-  /* 6) Broadcast result (incl. origin/dir for visuals) */
+  /* ---------- 6) broadcast ---------- */
   const payload = JSON.stringify({
     action: "shootResult",
     shooter: name,
-    hit: hitName ? { name: hitName } : null,
+    shooterScore,
+    hit: hitPlayer ? { name: hitPlayer.name } : null,
     origin,
     direction,
-    message: hitName ? `Hit ${hitName}!` : "Miss!",
+    message: hitPlayer ? `Hit ${hitPlayer.name}!` : "Miss!",
   });
 
-  await broadcastToAll(apigw, Items, payload);
+  await broadcast(apigw, live.Items || [], payload);
   return { statusCode: 200 };
 }

@@ -9,7 +9,7 @@ export default class Network {
       this.onMessage = onMessage;
 
       // Your API‑GW WebSocket endpoint
-      this.wsUrl = "wss://besdqwvktd.execute-api.us-east-2.amazonaws.com/production";
+      this.wsUrl = "wss://hxc4855uq1.execute-api.us-west-1.amazonaws.com/production";
       this.ws    = null;
 
       this.connect();
@@ -24,7 +24,7 @@ export default class Network {
         this.send({ action: "getGameState" });
       };
       this.ws.onmessage = ({ data }) => this.onMessage(JSON.parse(data));
-      this.ws.onclose   = () => { alert("Disconnected"); window.location.reload(); };
+      this.ws.onclose   = () => { window.location.reload(); };
       this.ws.onerror   = err  => console.error("WebSocket error:", err);
     }
 
