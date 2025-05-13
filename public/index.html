@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Laser Cubes Multiplayer</title>
+  <link rel="stylesheet" href="public/style.css">
+  <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+</head>
+<body>
+  <div id="loginOverlay">
+    <div id="loginBox">
+      <h2>Welcome to Laser Cubes</h2>
+      <input type="text" id="playerNameInput" placeholder="Player name">
+      <button id="loginButton">Join Game</button>
+    </div>
+  </div>
+
+  <div id="pauseOverlay">
+    <div id="pauseBox">
+      <button id="resumeButton">Resume</button>
+      <button id="logoutButton">Logout</button>
+    </div>
+  </div>
+  <div id="leaderboard">
+    <h3>Top&nbsp;5</h3>
+    <ol></ol>
+  </div>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

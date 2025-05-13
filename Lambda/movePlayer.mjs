@@ -1,4 +1,5 @@
-import { DynamoDBClient }  from "@aws-sdk/client-dynamodb";
+// movePlayer.mjs
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -10,108 +11,124 @@ import {
   PostToConnectionCommand
 } from "@aws-sdk/client-apigatewaymanagementapi";
 
-const ddb = new DynamoDBClient({});
-const doc = DynamoDBDocumentClient.from(ddb);
+const ddb       = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(ddb);
 
-async function broadcastToAll(doc, apigw, Items, payload) {
-  await Promise.all(Items.map(async item => {
-    const conn = item.connectionId;
-    try {
-      await apigw.send(new PostToConnectionCommand({
-        ConnectionId: conn,
-        Data: payload
-      }));
-    } catch (err) {
-      // 410 = GoneException
-      if (err.name === "GoneException" || err.$metadata?.httpStatusCode === 410) {
-        console.log(`Cleaning up stale connection ${conn} for player ${item.name}`);
-        // remove the stale connectionId from the player's record
-        await doc.send(new UpdateCommand({
-          TableName: "LaserGamePlayers",
-          Key: { name: item.name },
-          UpdateExpression: "REMOVE connectionId"
-        }));
-      } else {
-        console.error("Failed to broadcast to", conn, err);
-      }
-    }
-  }));
-}
-
+const TABLE     = "LaserGamePlayers";
+const GRID_SIZE = 135;               // keep in sync with Game.js grid
 
 export async function handler(event) {
-  // WebSocket management client
-  const { domainName, stage, connectionId } = event.requestContext;
+  console.log("movePlayer invoked:", event.body);
+
+  const { domainName, stage } = event.requestContext;
   const apigw = new ApiGatewayManagementApiClient({
     endpoint: `https://${domainName}/${stage}`
   });
 
-  // Pull name AND direction from the payload
-  const { name, direction } = JSON.parse(event.body);
+  /* ------------------------------------------------- *
+   * 1) Parse payload  { name, x, y, baseY }
+   * ------------------------------------------------- */
+  const {
+    name: playerName,
+    x: rawX,
+    y: rawY,
+    baseY: rawBaseY
+  } = JSON.parse(event.body || "{}");
 
-  // Load that player by name
-  const { Item = {} } = await doc.send(new GetCommand({
-    TableName: "LaserGamePlayers",
-    Key: { name }
-  }));
-
-  // Destructure position & score
-  let { x = 0, y = 0, score = 0 } = Item;
-
-  // Apply movement logic
-  const gridSize = 10;
-  switch (direction) {
-    case "up":    y = Math.max(0, y - 1); break;
-    case "down":  y = Math.min(gridSize - 1, y + 1); break;
-    case "left":  x = Math.max(0, x - 1); break;
-    case "right": x = Math.min(gridSize - 1, x + 1); break;
+  if (playerName === undefined || rawX === undefined || rawY === undefined) {
+    return { statusCode: 400, body: "Missing name / x / y" };
   }
 
-  // Write back exactly as before
-  const now = Date.now();
-  await doc.send(new UpdateCommand({
-    TableName: "LaserGamePlayers",
-    Key: { name },
-    UpdateExpression: [
-      "SET #x        = :x",
-      "  , #y        = :y",
-      "  , #score    = :score",
-      "  , #online   = :online",
-      "  , #lastActive = :now"
-    ].join(" "),
-    ExpressionAttributeNames: {
-      "#x": "x",
-      "#y": "y",
-      "#score": "score",
-      "#online": "online",
-      "#lastActive": "lastActive"
-    },
-    ExpressionAttributeValues: {
-      ":x": x,
-      ":y": y,
-      ":score": score,
-      ":online": true,
-      ":now": now
-    }
-  }));
-  
-  
+  // Clamp to grid and round to int
+  const x = Math.max(0, Math.min(GRID_SIZE - 1, Math.round(rawX)));
+  const y = Math.max(0, Math.min(GRID_SIZE - 1, Math.round(rawY)));
+  const baseY =
+    typeof rawBaseY === "number" && !Number.isNaN(rawBaseY) ? rawBaseY : 0;
 
-  const { Items = [] } = await doc.send(new ScanCommand({
-    TableName: "LaserGamePlayers",
-    IndexName: "connectionId",
-    ProjectionExpression: "connectionId, #nm",
-    ExpressionAttributeNames: { 
-      "#nm": "name" 
-    }
-  }));
-  
+  /* ------------------------------------------------- *
+   * 2) Ensure player exists
+   * ------------------------------------------------- */
+  const { Item } = await docClient.send(
+    new GetCommand({ TableName: TABLE, Key: { name: playerName } })
+  );
+  if (!Item) return { statusCode: 404, body: "Player not found" };
+
+  /* ------------------------------------------------- *
+   * 3) Update position (and baseY) in DynamoDB
+   * ------------------------------------------------- */
+  await docClient.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { name: playerName },
+      UpdateExpression:
+        "SET #x = :x, #y = :y, #baseY = :by, #online = :on, #lastActive = :now",
+      ExpressionAttributeNames: {
+        "#x": "x",
+        "#y": "y",
+        "#baseY": "baseY",
+        "#online": "online",
+        "#lastActive": "lastActive"
+      },
+      ExpressionAttributeValues: {
+        ":x": x,
+        ":y": y,
+        ":by": baseY,
+        ":on": true,
+        ":now": Date.now()
+      }
+    })
+  );
+
+  /* ------------------------------------------------- *
+   * 4) Broadcast to everyone online
+   * ------------------------------------------------- */
+  const { Items = [] } = await docClient.send(
+    new ScanCommand({
+      TableName: TABLE,
+      ProjectionExpression: "connectionId, #nm",
+      ExpressionAttributeNames: { "#nm": "name", "#online": "online" },
+      FilterExpression: "#online = :true",
+      ExpressionAttributeValues: { ":true": true }
+    })
+  );
 
   const payload = JSON.stringify({
     action: "playerMoved",
-    name, x, y
+    name: playerName,
+    x,
+    y,
+    baseY
   });
-    +  await broadcastToAll(doc, apigw, Items, payload);
-  // Return stub
+
+  await Promise.all(
+    Items.filter(c => c.connectionId).map(c =>
+      apigw
+        .send(
+          new PostToConnectionCommand({
+            ConnectionId: c.connectionId,
+            Data: payload
+          })
+        )
+        .catch(err => {
+          // Clean up stale connections
+          if (
+            err.name === "GoneException" ||
+            err.$metadata?.httpStatusCode === 410
+          ) {
+            return docClient.send(
+              new UpdateCommand({
+                TableName: TABLE,
+                Key: { name: c.name },
+                UpdateExpression:
+                  "REMOVE connectionId SET #online = :false",
+                ExpressionAttributeNames: { "#online": "online" },
+                ExpressionAttributeValues: { ":false": false }
+              })
+            );
+          }
+        })
+    )
+  );
+
   return { statusCode: 200, body: "OK" };
 }

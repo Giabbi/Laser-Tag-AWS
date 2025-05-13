@@ -1,124 +1,177 @@
+// shootLaser.mjs
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
   GetCommand,
   ScanCommand,
-  UpdateCommand
+  UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import {
   ApiGatewayManagementApiClient,
-  PostToConnectionCommand
+  PostToConnectionCommand,
 } from "@aws-sdk/client-apigatewaymanagementapi";
+
+/* -------------------------------------------------- *
+ *  Constants – keep in sync with Game.js
+ * -------------------------------------------------- */
+const GRID_SIZE  = 135;
+const SPACING    = 0.2;
+const PLAYER_RAD = 0.5;
 
 const ddb = new DynamoDBClient({});
 const doc = DynamoDBDocumentClient.from(ddb);
 
-async function broadcastToAll(doc, apigw, Items, payload) {
-  await Promise.all(Items.map(async item => {
-    const conn = item.connectionId;
-    try {
-      await apigw.send(new PostToConnectionCommand({
-        ConnectionId: conn,
-        Data: payload
-      }));
-    } catch (err) {
-      // 410 = GoneException
-      if (err.name === "GoneException" || err.$metadata?.httpStatusCode === 410) {
-        console.log(`Cleaning up stale connection ${conn} for player ${item.name}`);
-        // remove the stale connectionId from the player's record
-        await doc.send(new UpdateCommand({
-          TableName: "LaserGamePlayers",
-          Key: { name: item.name },
-          UpdateExpression: "REMOVE connectionId"
-        }));
-      } else {
-        console.error("Failed to broadcast to", conn, err);
+/* helper – broadcast payload to all live sockets */
+async function broadcast(apigw, liveItems, payload) {
+  await Promise.all(
+    liveItems.map(async item => {
+      if (!item.connectionId) return;
+      try {
+        await apigw.send(
+          new PostToConnectionCommand({
+            ConnectionId: item.connectionId,
+            Data: payload,
+          })
+        );
+      } catch (err) {
+        if (
+          err.name === "GoneException" ||
+          err.$metadata?.httpStatusCode === 410
+        ) {
+          /* mark them offline */
+          await doc.send(
+            new UpdateCommand({
+              TableName: "LaserGamePlayers",
+              Key: { name: item.name },
+              UpdateExpression: "REMOVE connectionId SET #on = :f",
+              ExpressionAttributeNames: { "#on": "online" },
+              ExpressionAttributeValues: { ":f": false },
+            })
+          );
+        }
       }
-    }
-  }));
+    })
+  );
 }
 
+/* ============================================================ */
 export async function handler(event) {
-  // Build WebSocket management client
   const { domainName, stage, connectionId } = event.requestContext;
   const apigw = new ApiGatewayManagementApiClient({
-    endpoint: `https://${domainName}/${stage}`
+    endpoint: `https://${domainName}/${stage}`,
   });
 
-  // Parse incoming JSON (must include name & direction)
-  const { name, direction } = JSON.parse(event.body);
-
-  // Load the shooter’s record by name
-  const getResult = await doc.send(new GetCommand({
-    TableName: "LaserGamePlayers",
-    Key: { name }
-  }));
-
-  if (!getResult.Item) {
-    // Notify client of error
-    const errPayload = JSON.stringify({
-      action: "shootResult",
-      error: "Player not found"
-    });
-    await apigw.send(new PostToConnectionCommand({
-      ConnectionId: connectionId,
-      Data: errPayload
-    }));
-    return { statusCode: 200, body: "Handled missing player" };
+  /* ---------- 1) parse payload ---------- */
+  let data = {};
+  try {
+    data = JSON.parse(event.body || "{}");
+  } catch (_) {}
+  const { name, origin, direction } = data;
+  if (!name || !origin || !direction) {
+    await apigw.send(
+      new PostToConnectionCommand({
+        ConnectionId: connectionId,
+        Data: JSON.stringify({
+          action: "shootResult",
+          error: "Invalid shoot payload",
+        }),
+      })
+    );
+    return { statusCode: 400 };
   }
 
-  const { x, y } = getResult.Item;
-
-  // Scan for other players and detect a hit
-  const scanResult = await doc.send(new ScanCommand({
-    TableName: "LaserGamePlayers"
-  }));
-
-  let hit = null;
-  for (const player of scanResult.Items || []) {
-    if (player.name === name) continue;
-    const dx = player.x - x;
-    const dy = player.y - y;
-
-    if (
-      (direction === "up"    && dx === 0 && dy < 0) ||
-      (direction === "down"  && dx === 0 && dy > 0) ||
-      (direction === "left"  && dy === 0 && dx < 0) ||
-      (direction === "right" && dy === 0 && dx > 0)
-    ) {
-      hit = player;
-      break;
-    }
-  }
-
-  // If hit, increment shooter’s score
-  if (hit) {
-    await doc.send(new UpdateCommand({
+  /* ---------- 2) ensure shooter exists ---------- */
+  const shooter = await doc.send(
+    new GetCommand({
       TableName: "LaserGamePlayers",
       Key: { name },
-      UpdateExpression: "SET score = score + :inc",
-      ExpressionAttributeValues: { ":inc": 1 }
-    }));
+    })
+  );
+  if (!shooter.Item) {
+    await apigw.send(
+      new PostToConnectionCommand({
+        ConnectionId: connectionId,
+        Data: JSON.stringify({
+          action: "shootResult",
+          error: "Player not found",
+        }),
+      })
+    );
+    return { statusCode: 200 };
   }
 
-  // Broadcast to everyone via the GSI
-  const { Items = [] } = await doc.send(new ScanCommand({
-    TableName: "LaserGamePlayers",
-    IndexName: "ConnectionId",
-    ProjectionExpression: "connectionId, #nm",
-    ExpressionAttributeNames: { 
-      "#nm": "name" 
-    }
-  }));
-  
+  /* ---------- 3) raycast vs every other player ---------- */
+  const scan = await doc.send(new ScanCommand({ TableName: "LaserGamePlayers" }));
 
+  const dir = direction; // already normalized by client
+  let closestT  = Infinity;
+  let hitPlayer = null;
+
+  for (const p of scan.Items || []) {
+    if (p.name === name) continue;   // don't hit yourself
+
+    /* grid → world */
+    const cx = (p.x - GRID_SIZE / 2 + 0.5) * SPACING;
+    const baseY = typeof p.baseY === "number" ? p.baseY : 0;
+    const cy = baseY + PLAYER_RAD;
+    const cz = (p.y - GRID_SIZE / 2 + 0.5) * SPACING;
+
+    /* origin→centre vector */
+    const ocx = cx - origin.x;
+    const ocy = cy - origin.y;
+    const ocz = cz - origin.z;
+
+    const tca = ocx * dir.x + ocy * dir.y + ocz * dir.z;
+    if (tca < 0) continue; // behind shooter
+
+    const d2 =
+      ocx * ocx + ocy * ocy + ocz * ocz - tca * tca;
+    if (d2 > PLAYER_RAD * PLAYER_RAD) continue;
+
+    const thc  = Math.sqrt(PLAYER_RAD * PLAYER_RAD - d2);
+    const tHit = tca - thc;
+    if (tHit >= 0 && tHit < closestT) {
+      closestT  = tHit;
+      hitPlayer = p;
+    }
+  }
+
+  /* ---------- 4) update score if hit ---------- */
+  let shooterScore = shooter.Item.score ?? 0;
+  if (hitPlayer) {
+    const res = await doc.send(
+      new UpdateCommand({
+        TableName: "LaserGamePlayers",
+        Key: { name },
+        UpdateExpression: "SET score = score + :inc",
+        ExpressionAttributeValues: { ":inc": 1 },
+        ReturnValues: "UPDATED_NEW",
+      })
+    );
+    shooterScore = res.Attributes?.score ?? shooterScore;
+  }
+
+  /* ---------- 5) gather live connections ---------- */
+  const live = await doc.send(
+    new ScanCommand({
+      TableName: "LaserGamePlayers",
+      ProjectionExpression: "connectionId, #nm",
+      ExpressionAttributeNames: { "#nm": "name" },
+      FilterExpression: "attribute_exists(connectionId)",
+    })
+  );
+
+  /* ---------- 6) broadcast ---------- */
   const payload = JSON.stringify({
     action: "shootResult",
-    name,
-    result: hit ? `Hit ${hit.name}` : "Miss",
-    score: hit ? "Point awarded!" : "Better luck next time!"
+    shooter: name,
+    shooterScore,
+    hit: hitPlayer ? { name: hitPlayer.name } : null,
+    origin,
+    direction,
+    message: hitPlayer ? `Hit ${hitPlayer.name}!` : "Miss!",
   });
-  await broadcastToAll(doc, apigw, Items, payload);
-  
-  return { statusCode: 200, body: "OK" };
+
+  await broadcast(apigw, live.Items || [], payload);
+  return { statusCode: 200 };
 }
