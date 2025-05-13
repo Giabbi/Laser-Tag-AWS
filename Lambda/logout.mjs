@@ -1,73 +1,91 @@
-// logout.mjs
+// logout.mjs  – broadcasts playerLeft and no longer throws ValidationException
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
   QueryCommand,
-  UpdateCommand
+  UpdateCommand,
+  ScanCommand
 } from "@aws-sdk/lib-dynamodb";
+import {
+  ApiGatewayManagementApiClient,
+  PostToConnectionCommand
+} from "@aws-sdk/client-apigatewaymanagementapi";
 
 const client    = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
+const TABLE     = "LaserGamePlayers";
 
 export async function handler(event) {
-  // **1. Log the entire incoming event**
   console.log("Logout event received:", JSON.stringify(event, null, 2));
 
-  // **2. Defensive check for requestContext and connectionId**
-  if (!event || !event.requestContext || !event.requestContext.connectionId) {
-    console.error("Error: requestContext or connectionId missing in logout event.", event);
-    // Depending on how API Gateway handles errors from $disconnect,
-    // returning an error might be appropriate, or just logging and exiting.
-    // For $disconnect, usually, you can't send a response back to the closed connection.
-    return { statusCode: 200 }; // Or 500 if you want to flag an issue in metrics
-  }
+  // 0) Guard — need connectionId on $disconnect
+  if (!event?.requestContext?.connectionId) return { statusCode: 200 };
+  const { connectionId, domainName, stage } = event.requestContext;
 
-  const connectionId = event.requestContext.connectionId;
-  const tableName    = "LaserGamePlayers";
-  console.log(`Processing $disconnect for connectionId: ${connectionId}`);
-
-  // 3) Find the player record by connectionId GSI
-  let playerToLogout;
-  try {
-    const { Items = [] } = await docClient.send(new QueryCommand({
-      TableName: tableName,
-      IndexName: "connectionId", // your GSI name (lowercase)
+  // 1) Fetch the player bound to that connectionId
+  const { Items: found = [] } = await docClient.send(
+    new QueryCommand({
+      TableName:  TABLE,
+      IndexName:  "connectionId",
       KeyConditionExpression: "connectionId = :cid",
       ExpressionAttributeValues: { ":cid": connectionId }
-    }));
+    })
+  );
+  if (found.length === 0) return { statusCode: 200 };
+  const { name } = found[0];
 
-    if (Items.length === 0) {
-      console.log(`No player found with connectionId: ${connectionId}. Nothing to do for logout.`);
-      return { statusCode: 200 };
-    }
-    playerToLogout = Items[0];
-    console.log("Player found for logout:", JSON.stringify(playerToLogout, null, 2));
-  } catch (err) {
-    console.error(`Error querying for player with connectionId ${connectionId}:`, JSON.stringify(err, null, 2));
-    return { statusCode: 500 }; // Internal error
-  }
-
-  const { name } = playerToLogout;
-  if (!name) {
-    console.error(`Player item found for connectionId ${connectionId} is missing a 'name'. Cannot update. Item:`, JSON.stringify(playerToLogout, null, 2));
-    return { statusCode: 500 }; // Data integrity issue
-  }
-
-  // 4) Mark offline and remove the stale connectionId
-  try {
-    console.log(`Updating player '${name}' to offline and removing connectionId.`);
-    await docClient.send(new UpdateCommand({
-      TableName: tableName,
-      Key: { name }, // primary key
+  // 2) Mark them offline & drop connectionId
+  await docClient.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { name },
       UpdateExpression: "SET #online = :f REMOVE connectionId",
       ExpressionAttributeNames: { "#online": "online" },
-      ExpressionAttributeValues: { ":f": false }
-    }));
-    console.log(`Player '${name}' successfully marked as offline.`);
-  } catch (err) {
-    console.error(`Error updating player '${name}' for logout:`, JSON.stringify(err, null, 2));
-    return { statusCode: 500 }; // Internal error
-  }
+      ExpressionAttributeValues:{ ":f": false }
+    })
+  );
+
+  // 3) Notify everyone still online
+  const apigw = new ApiGatewayManagementApiClient({
+    endpoint: `https://${domainName}/${stage}`
+  });
+
+  const { Items: others = [] } = await docClient.send(
+    new ScanCommand({
+      TableName: TABLE,
+      ProjectionExpression: "connectionId, #nm",
+      ExpressionAttributeNames: { "#nm": "name" },
+      FilterExpression: "attribute_exists(connectionId)"
+    })
+  );
+
+  const payload = JSON.stringify({ action: "playerLeft", name });
+
+  await Promise.all(
+    others.map(async (p) => {
+      try {
+        await apigw.send(
+          new PostToConnectionCommand({
+            ConnectionId: p.connectionId,
+            Data: payload
+          })
+        );
+      } catch (err) {
+        // Clean up stale sockets
+        if (err.name === "GoneException" || err.$metadata?.httpStatusCode === 410) {
+          await docClient.send(
+            new UpdateCommand({
+              TableName: TABLE,
+              Key: { name: p.name },
+              UpdateExpression: "REMOVE connectionId SET #online = :f",
+              ExpressionAttributeNames: { "#online": "online" },
+              ExpressionAttributeValues:{ ":f": false }
+            })
+          );
+        }
+      }
+    })
+  );
 
   return { statusCode: 200 };
 }

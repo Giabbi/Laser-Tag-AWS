@@ -324,46 +324,39 @@ export default class Game {
   }
 
   // New method to handle shoot effects from server message
-  handleShootEffect(shooterName, hitInfo, /*_origin, _direction*/) {
-      // _origin and _direction from server can be used to draw the actual laser path
-      console.log("Shoot effect from server:", shooterName, "hit:", hitInfo);
+  handleShootEffect(shooterName, hitInfo, origin, direction) {
+    console.log("Shoot effect:", shooterName, hitInfo);
 
+    /* ---------- visual bullet for *remote* shooters ---------- */
+    if (shooterName !== this.network.name && origin && direction) {
+      const bulletGeo = new THREE.SphereGeometry(this.bulletRadius, 6, 6);
+      const bulletMat = new THREE.MeshBasicMaterial({ color: 0xff8800 });
+      const bulletMesh = new THREE.Mesh(bulletGeo, bulletMat);
+      bulletMesh.position.set(origin.x, origin.y, origin.z);
+      this.scene.add(bulletMesh);
+      this.projectiles.push({
+        mesh: bulletMesh,
+        velocity: new THREE.Vector3(direction.x, direction.y, direction.z)
+                    .multiplyScalar(this.bulletSpeed),
+        life: this.bulletLife,
+        shooterName
+      });
+    }
 
-      if (shooterName !== this.network.name && origin && direction) {
-        const bulletGeo = new THREE.SphereGeometry(this.bulletRadius, 6, 6);
-        const bulletMat = new THREE.MeshBasicMaterial({ color: 0xff8800 });
-        const bulletMesh = new THREE.Mesh(bulletGeo, bulletMat);
-        bulletMesh.position.set(origin.x, origin.y, origin.z);
-        this.scene.add(bulletMesh);
-        this.projectiles.push({
-          mesh: bulletMesh,
-          velocity: new THREE.Vector3(direction.x, direction.y, direction.z)
-                      .multiplyScalar(this.bulletSpeed),
-          life: this.bulletLife,
-          shooterName
-        });
+    /* ---------- simple hit feedback (flash red) -------------- */
+    if (hitInfo) {
+      const victim = this.players[hitInfo.name];
+      if (victim) {
+        const original = victim.material.color.getHex();
+        victim.material.color.setHex(0xff0000);
+        setTimeout(() => {
+          if (victim) victim.material.color.setHex(original);
+        }, 200);
+      } else if (hitInfo.name === this.network.name) {
+        // TODO: screen flash for self‑hit
+        console.log("I was hit!");
       }
-      
-      if (hitInfo) {
-          console.log(`${shooterName} hit ${hitInfo.name}!`);
-          // Maybe make the hit player flash red or something
-          if (this.players[hitInfo.name]) {
-              // Simple flash effect
-              const originalColor = this.players[hitInfo.name].material.color.getHex();
-              this.players[hitInfo.name].material.color.setHex(0xff0000);
-              setTimeout(() => {
-                  if (this.players[hitInfo.name]) { // Check if player still exists
-                      this.players[hitInfo.name].material.color.setHex(originalColor);
-                  }
-              }, 200);
-          } else if (hitInfo.name === this.network.name) { // If I was hit
-              // TODO: Indicate self was hit (e.g. screen flash red)
-              console.log("I was hit!");
-          }
-
-      } else {
-          console.log(`${shooterName} missed.`);
-      }
+    }
   }
 
   dispose() {

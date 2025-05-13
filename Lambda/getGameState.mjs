@@ -1,6 +1,9 @@
-// getGameState.mjs
+// getGameState.mjs – now returns ONLY players currently online
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  DynamoDBDocumentClient,
+  ScanCommand
+} from "@aws-sdk/lib-dynamodb";
 import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand
@@ -8,6 +11,7 @@ import {
 
 const client = new DynamoDBClient({});
 const doc    = DynamoDBDocumentClient.from(client);
+const TABLE  = "LaserGamePlayers";
 
 export async function handler(event) {
   const { domainName, stage, connectionId } = event.requestContext;
@@ -15,14 +19,23 @@ export async function handler(event) {
     endpoint: `https://${domainName}/${stage}`
   });
 
-  const { Items = [] } = await doc.send(new ScanCommand({
-    TableName: "LaserGamePlayers"
-  }));
+  /* Return only those with online === true */
+  const { Items = [] } = await doc.send(
+    new ScanCommand({
+      TableName: TABLE,
+      ProjectionExpression: "#nm, x, y, baseY, score",
+      ExpressionAttributeNames: { "#nm": "name", "#on": "online" },
+      FilterExpression: "#on = :t",
+      ExpressionAttributeValues:{ ":t": true }
+    })
+  );
 
-  await apigw.send(new PostToConnectionCommand({
-    ConnectionId: connectionId,
-    Data: JSON.stringify({ action: "gameState", players: Items })
-  }));
+  await apigw.send(
+    new PostToConnectionCommand({
+      ConnectionId: connectionId,
+      Data: JSON.stringify({ action: "gameState", players: Items })
+    })
+  );
 
   return { statusCode: 200 };
 }
